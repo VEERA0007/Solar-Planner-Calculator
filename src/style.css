@@ -1,0 +1,65 @@
+:root{
+  --bg:#0F172A; --card:#1E293B; --line:#334155; --text:#F1F5F9; --mute:#94A3B8;
+  --acc:#FBBF24; --acc2:#F59E0B; --good:#34D399; --bad:#F87171;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+body{padding:env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom));max-width:720px;margin:0 auto}
+.top{display:flex;justify-content:space-between;align-items:center;padding:14px 0 6px}
+h1{font-size:22px;margin:0;letter-spacing:.2px}
+h1::before{content:"\2600\FE0F  "}
+.top p{margin:2px 0 0;color:var(--mute);font-size:13px}
+h2{font-size:15px;margin:0 0 10px;color:var(--acc)}
+.icon{background:var(--card);border:1px solid var(--line);color:var(--text);border-radius:10px;width:42px;height:42px;font-size:20px}
+.tabs{display:flex;gap:6px;margin:10px 0 14px;position:sticky;top:0;background:var(--bg);padding:6px 0;z-index:5}
+.tab{flex:1;padding:10px 6px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--mute);font-weight:600}
+.tab.on{background:var(--acc);color:#1c1300;border-color:var(--acc)}
+.pill{background:var(--line);color:var(--text);border-radius:99px;padding:0 7px;font-size:12px;margin-left:4px}
+.tab.on .pill{background:#1c1300;color:var(--acc)}
+.panel{display:none}.panel.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+.card.center{text-align:center;color:var(--mute)}
+details.card summary{font-weight:600;color:var(--acc);cursor:pointer;margin-bottom:6px}
+label{display:block;font-size:12.5px;color:var(--mute);margin:10px 0 0}
+input,select{width:100%;margin-top:5px;padding:12px;border-radius:10px;border:1px solid var(--line);
+  background:var(--bg);color:var(--text);font-size:16px}
+input:focus,select:focus{outline:2px solid var(--acc);border-color:transparent}
+.row{display:flex;gap:8px;align-items:flex-end}.row.wrap{flex-wrap:wrap;margin-top:8px}
+.row input{flex:1}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn{background:var(--acc);color:#1c1300;border:0;border-radius:10px;padding:12px 16px;font-weight:700;font-size:15px}
+.btn.sm{padding:11px 14px;font-size:14px}
+.btn.big{width:100%;padding:15px;font-size:16px}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line);font-weight:600}
+.btn:active{transform:scale(.98)}
+.hint{color:var(--mute);font-size:12.5px;margin:8px 0 0;min-height:1em}
+.hint.ok{color:var(--good)}.hint.warn{color:var(--acc)}.hint.err{color:var(--bad)}
+.seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:transparent;color:var(--mute);padding:9px;border-radius:8px;font-weight:600}
+.seg button.on{background:var(--acc);color:#1c1300}
+.hero{background:linear-gradient(135deg,#F59E0B,#FBBF24);color:#1c1300;border-radius:16px;padding:18px;margin-bottom:12px;text-align:center}
+.hero .big{font-size:40px;font-weight:800;line-height:1.1}
+.hero .sub{font-weight:600;opacity:.85}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+.stat span{display:block;color:var(--mute);font-size:12px}
+.stat b{font-size:17px}
+.stat.hi{border-color:var(--acc)}
+.chart svg{width:100%;height:auto;display:block}
+.actions .btn{flex:1}
+#list .item{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+#list .item h3{margin:0 0 2px;font-size:16px}
+#list .meta{color:var(--mute);font-size:12.5px}
+#list .nums{margin:8px 0;font-size:13.5px}
+#list .acts{display:flex;gap:8px}
+#list .acts button{flex:1}
+mark{background:var(--acc);color:#1c1300;border-radius:3px;padding:0 2px}
+dialog{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:16px;width:min(92vw,420px)}
+dialog::backdrop{background:#000a}
+dialog h2{margin-top:0}
+dialog .row{margin-top:14px}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translate(-50%,30px);
+  background:#0b1220;border:1px solid var(--acc);color:var(--text);padding:10px 16px;border-radius:99px;opacity:0;
+  transition:.25s;pointer-events:none;max-width:90vw;text-align:center;z-index:20}
+.toast.show{opacity:1;transform:translate(-50%,0)}

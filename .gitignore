@@ -1,8 +1,20 @@
-node_modules/
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+build/
+pubspec.lock
+.flutter-plugins
+.flutter-plugins-dependencies
+# Native folders are generated in CI by tools/scaffold.sh
+/android/
+/ios/
+/windows/
+/web/
+/linux/
+/macos/
+analysis_options.yaml
+.metadata
 dist/
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
 *.log
 .DS_Store

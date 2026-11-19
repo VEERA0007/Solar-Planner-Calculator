@@ -1,0 +1,166 @@
+name: Build Apps
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Scaffold
+        run: tools/scaffold.sh web
+      - run: flutter pub get
+      - name: Analyze (errors fail the build)
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - run: flutter test
+
+  android:
+    name: Android APK
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Version
+        run: echo "VERSION=$(cat VERSION | tr -d '[:space:]')" >> "$GITHUB_ENV"
+      - name: Scaffold
+        run: tools/scaffold.sh android
+      - run: flutter pub get
+      - name: Build release APK
+        run: flutter build apk --release --build-name="$VERSION" --build-number="${{ github.run_number }}"
+      - name: Rename
+        run: cp build/app/outputs/flutter-apk/app-release.apk "SolarPlanner-$VERSION-build-${{ github.run_number }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: SolarPlanner-*.apk
+          retention-days: 30
+
+  windows:
+    name: Windows desktop
+    needs: test
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Version
+        shell: bash
+        run: echo "VERSION=$(cat VERSION | tr -d '[:space:]')" >> "$GITHUB_ENV"
+      - name: Scaffold
+        shell: bash
+        run: tools/scaffold.sh windows
+      - run: flutter pub get
+      - name: Build
+        shell: bash
+        run: flutter build windows --release --build-name="$VERSION" --build-number="${{ github.run_number }}"
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "SolarPlanner-$env:VERSION-build-${{ github.run_number }}-windows.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: SolarPlanner-*-windows.zip
+          retention-days: 30
+
+  web:
+    name: Web app
+    needs: test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Version
+        run: echo "VERSION=$(cat VERSION | tr -d '[:space:]')" >> "$GITHUB_ENV"
+      - name: Scaffold
+        run: tools/scaffold.sh web
+      - run: flutter pub get
+      - name: Build
+        run: flutter build web --release --base-href "/${{ github.event.repository.name }}/" --build-name="$VERSION" --build-number="${{ github.run_number }}"
+      - name: Zip
+        run: cd build/web && zip -qr "../../SolarPlanner-$VERSION-build-${{ github.run_number }}-web.zip" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-zip
+          path: SolarPlanner-*-web.zip
+          retention-days: 30
+
+  ios:
+    name: iOS (unsigned)
+    needs: test
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Version
+        run: echo "VERSION=$(cat VERSION | tr -d '[:space:]')" >> "$GITHUB_ENV"
+      - name: Scaffold
+        run: tools/scaffold.sh ios
+      - run: flutter pub get
+      - name: Build (no code signing)
+        run: flutter build ios --release --no-codesign --build-name="$VERSION" --build-number="${{ github.run_number }}"
+      - name: Package unsigned IPA
+        run: |
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qr "SolarPlanner-$VERSION-build-${{ github.run_number }}-ios-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: SolarPlanner-*.ipa
+          retention-days: 30
+
+  release:
+    name: Publish release
+    needs: [android, windows, web, ios]
+    if: ${{ !cancelled() && needs.android.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(cat VERSION | tr -d '[:space:]')"
+          TAG="build-${{ github.run_number }}"
+          find dist -type f -print
+          gh release create "$TAG" $(find dist -type f) \
+            --title "Solar Planner $VERSION (build ${{ github.run_number }})" \
+            --notes "Version $VERSION, build ${{ github.run_number }}. Android: install the .apk. Windows: unzip and run calculator.exe. Web: unzip and host. iOS: unsigned .ipa for sideloading." \
+            --latest

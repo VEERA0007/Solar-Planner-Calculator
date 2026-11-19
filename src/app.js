@@ -113,6 +113,7 @@ function run() {
   currentInput = inp;
   current = calculate(inp);
   render(current);
+  window.dispatchEvent(new CustomEvent('sp:site', { detail: { kwp: Math.round(current.kw * 100) / 100, tariff: inp.tariff } }));
   setTab('res');
 }
 const fmt1 = (n) => (Math.round(n * 10) / 10).toLocaleString('en-IN');
@@ -330,7 +331,7 @@ function init() {
   $('search').addEventListener('input', renderList);
   $('list').addEventListener('click', listClick);
   $('exportBtn').addEventListener('click', exportCsv);
-  $('settingsBtn').addEventListener('click', openSettings);
+  $('gearBtn').addEventListener('click', openSettings);
   $('settings').addEventListener('close', () => {
     if ($('settings').returnValue === 'ok') {
       brand = { company: $('setCompany').value.trim(), phone: $('setPhone').value.trim(), note: $('setNote').value.trim() };

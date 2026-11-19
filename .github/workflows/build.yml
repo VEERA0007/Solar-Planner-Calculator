@@ -50,10 +50,14 @@ jobs:
       - name: Scaffold
         run: tools/scaffold.sh android
       - run: flutter pub get
-      - name: Build release APK
-        run: flutter build apk --release --target-platform android-arm,android-arm64 --build-name="$VERSION" --build-number="$BUILD"
-      - name: Rename
-        run: cp build/app/outputs/flutter-apk/app-release.apk "SolarPlanner-$VERSION-build-$BUILD.apk"
+      - name: Build smaller 64-bit APK (modern phones)
+        run: |
+          flutter build apk --release --target-platform android-arm64 --build-name="$VERSION" --build-number="$BUILD"
+          cp build/app/outputs/flutter-apk/app-release.apk "SolarPlanner-$VERSION-build-$BUILD-arm64.apk"
+      - name: Build universal APK (32-bit and 64-bit phones)
+        run: |
+          flutter build apk --release --target-platform android-arm,android-arm64 --build-name="$VERSION" --build-number="$BUILD"
+          cp build/app/outputs/flutter-apk/app-release.apk "SolarPlanner-$VERSION-build-$BUILD.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk

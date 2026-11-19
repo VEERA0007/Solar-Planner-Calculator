@@ -65,7 +65,7 @@ bool Function(String)? _assetMatcher() {
   if (kIsWeb) return null;
   switch (defaultTargetPlatform) {
     case TargetPlatform.android:
-      return (n) => n.endsWith('.apk');
+      return (n) => n.endsWith('.apk') && !n.contains('arm64');
     case TargetPlatform.windows:
       return (n) => n.contains('windows') && n.endsWith('.zip');
     case TargetPlatform.iOS:

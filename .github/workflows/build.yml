@@ -35,6 +35,17 @@ jobs:
           name: screenshots
           path: screenshots/
           if-no-files-found: ignore
+      - name: Publish screenshots to a review branch
+        if: always()
+        run: |
+          [ -d screenshots ] || exit 0
+          rm -rf /tmp/shots && mkdir /tmp/shots && cp screenshots/*.png /tmp/shots/
+          git config user.name "ci"; git config user.email "ci@users.noreply.github.com"
+          git checkout --orphan ci-screenshots
+          git rm -rf . >/dev/null 2>&1 || true
+          cp /tmp/shots/*.png .
+          git add *.png && git commit -qm "layout screenshots for ${GITHUB_SHA}"
+          git push -f origin ci-screenshots
 
   android:
     name: Android APK

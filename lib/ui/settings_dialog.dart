@@ -35,7 +35,7 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
     note = TextEditingController(text: s.brand.note);
     PackageInfo.fromPlatform().then((i) {
       if (mounted) setState(() => version = '${i.version} (build ${i.buildNumber})');
-    });
+    }).catchError((_) {});
   }
 
   @override

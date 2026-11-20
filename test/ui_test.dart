@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<void> _loadFonts() async {
@@ -60,7 +61,11 @@ Future<void> _shot(WidgetTester t, String name) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUpAll(_loadFonts);
+  setUpAll(() async {
+    PackageInfo.setMockInitialValues(
+        appName: 'Solar Planner', packageName: 'com.solarplanner.calculator', version: '0.0.7', buildNumber: '1', buildSignature: '');
+    await _loadFonts();
+  });
 
   const sizes = <String, Size>{'phone-small': Size(360, 700), 'phone': Size(412, 915), 'tablet': Size(820, 1180), 'desktop': Size(1280, 800)};
 

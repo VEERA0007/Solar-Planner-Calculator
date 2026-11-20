@@ -41,10 +41,10 @@ class AppliancePage extends StatelessWidget {
               highlight: DateTime.now().hour,
             ),
             const SizedBox(height: 6),
-            const Row(children: [
-              _Sw(Color(0xFFF59E0B)), SizedBox(width: 4), Text('Solar kW', style: TextStyle(color: C.mute, fontSize: 12.5)),
-              SizedBox(width: 14),
-              _Sw(Color(0xFF0A9BFF)), SizedBox(width: 4), Text('Load kW · hour of day 0–23', style: TextStyle(color: C.mute, fontSize: 12.5)),
+            Row(children: [
+              const _Sw(Color(0xFFF59E0B)), const SizedBox(width: 4), Text('Solar kW', style: TextStyle(color: C.mute, fontSize: 12.5)),
+              const SizedBox(width: 14),
+              const _Sw(Color(0xFF0A9BFF)), const SizedBox(width: 4), Text('Load kW · hour of day 0–23', style: TextStyle(color: C.mute, fontSize: 12.5)),
             ]),
           ]),
         ),

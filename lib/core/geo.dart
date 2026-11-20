@@ -56,7 +56,7 @@ Future<Place?> currentPlace() async {
     final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.low))
         .timeout(const Duration(seconds: 12));
-    return reverse(pos.latitude, pos.longitude);
+    return await reverse(pos.latitude, pos.longitude);
   } catch (_) {
     return null;
   }

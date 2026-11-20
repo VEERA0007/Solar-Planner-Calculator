@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../core/i18n.dart';
 import '../core/store.dart';
 import 'theme.dart';
 

@@ -7,7 +7,6 @@ import 'i18n.dart';
 import 'geo.dart';
 import 'solar_data.dart';
 import 'tariff.dart';
-import 'store_consts.dart';
 export 'store_consts.dart';
 
 const List<double> kMonthPsh = [5.4, 6.1, 6.6, 6.7, 6.4, 5.0, 4.3, 4.2, 4.6, 5.1, 4.9, 5.0];

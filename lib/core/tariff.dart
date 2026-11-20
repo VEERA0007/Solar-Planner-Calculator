@@ -171,13 +171,11 @@ class TariffBook {
   /// Bundled tariffs, replaced by a newer published file when reachable.
   static Future<TariffBook> load({String? cached, void Function(String)? onFresh}) async {
     var book = parse(await rootBundle.loadString('data/tariffs.json'));
-    String? raw;
     if (cached != null) {
       try {
         final c = parse(cached);
         if (c.version.compareTo(book.version) > 0) {
           book = c;
-          raw = cached;
         }
       } catch (_) {}
     }

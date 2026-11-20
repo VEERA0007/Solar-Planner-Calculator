@@ -157,20 +157,15 @@ class _ProfileDialogState extends State<_ProfileDialog> with SingleTickerProvide
       ),
       _f(t('panel'), 'panel', icon: Icons.solar_power_outlined),
       _f(t('inverter'), 'inv', icon: Icons.electrical_services),
-      Row(children: [
-        Expanded(
-          child: _f(t('commission'), 'date', readOnly: true, onTap: _pickDate, icon: Icons.event_outlined),
-        ),
-        const SizedBox(width: 10),
-        Expanded(child: _f(t('warranty'), 'war', kb: TextInputType.number)),
-      ]),
+      _f(t('commission'), 'date', readOnly: true, onTap: _pickDate, icon: Icons.event_outlined),
+      _f(t('warranty'), 'war', kb: TextInputType.number),
       const SizedBox(height: 14),
       Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(
-            sq > 0 ? 'Roof fits about ${fit.toStringAsFixed(1)} kWp · plant ${kw.toStringAsFixed(2)} kWp ${kw <= fit ? '✓' : '✗ too large'}' : '-',
+            sq > 0 ? 'Roof fits about ${fit.toStringAsFixed(1)} kWp · plant ${kw.toStringAsFixed(2)} kWp ${kw <= fit ? '(fits)' : '(too large for the roof)'}' : '-',
             style: TextStyle(color: kw <= fit || sq <= 0 ? C.green : C.red, fontSize: 12.5, fontWeight: FontWeight.w600),
           ),
           if (s.profile.commissionDate != null)

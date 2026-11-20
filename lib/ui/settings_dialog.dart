@@ -340,7 +340,7 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
           ),
           Flexible(
             child: SizedBox(
-              height: h * .56,
+              height: h * .6,
               child: TabBarView(controller: tabs, children: [_display(), _tariffs(), _alerts()]),
             ),
           ),

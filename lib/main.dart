@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'core/i18n.dart';
 import 'core/store.dart';
 import 'core/update.dart';
 import 'ui/appliance_page.dart';
@@ -21,14 +23,20 @@ class SolarApp extends StatefulWidget {
 
 class _SolarAppState extends State<SolarApp> {
   final AppState state = AppState();
+  Timer? _clock;
   final GlobalKey<NavigatorState> navKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
     super.initState();
-    state.load().then((_) {
-      state.sync();
+    state.load().then((_) async {
       _autoUpdateCheck();
+      await state.sync();
+      if (state.site.auto) state.locate(); // refreshes place, state and sun data from GPS when allowed
+    });
+    // day/night auto mode re-evaluates every minute
+    _clock = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted && state.prefs.dark == null) setState(() {});
     });
   }
 
@@ -58,18 +66,33 @@ class _SolarAppState extends State<SolarApp> {
 
   @override
   void dispose() {
+    _clock?.cancel();
     state.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navKey,
-      title: 'Solar Planner & Calculator',
-      debugShowCheckedModeBanner: false,
-      theme: buildTheme(),
-      home: Shell(state: state),
+    return ListenableBuilder(
+      listenable: state,
+      builder: (context, _) {
+        final dark = state.isDark(DateTime.now());
+        final theme = buildTheme(dark);
+        return MaterialApp(
+          navigatorKey: navKey,
+          title: 'Solar Planner & Calculator',
+          debugShowCheckedModeBanner: false,
+          theme: theme,
+          builder: (context, child) {
+            final mq = MediaQuery.of(context);
+            return MediaQuery(
+              data: mq.copyWith(textScaler: TextScaler.linear(autoTextScale(mq))),
+              child: child!,
+            );
+          },
+          home: Shell(state: state),
+        );
+      },
     );
   }
 }
@@ -79,11 +102,11 @@ class Shell extends StatelessWidget {
   const Shell({super.key, required this.state});
 
   static const _items = <(IconData, String)>[
-    (Icons.home_outlined, 'Home'),
-    (Icons.calculate_outlined, 'Estimator'),
-    (Icons.memory_outlined, 'Appliance Analysis'),
-    (Icons.wb_sunny_outlined, 'Solar Analysis'),
-    (Icons.build_outlined, 'Service'),
+    (Icons.home_outlined, 'home'),
+    (Icons.calculate_outlined, 'estimator'),
+    (Icons.memory_outlined, 'appliance'),
+    (Icons.wb_sunny_outlined, 'solar'),
+    (Icons.build_outlined, 'service'),
   ];
 
   @override
@@ -96,7 +119,7 @@ class Shell extends StatelessWidget {
           EstimatorPage(state: state),
           AppliancePage(state: state),
           SolarPage(state: state),
-          const ServicePage(),
+          ServicePage(state: state),
         ];
         return Scaffold(
           body: SafeArea(
@@ -113,7 +136,7 @@ class Shell extends StatelessWidget {
             labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
             height: 72,
             destinations: [
-              for (final it in _items) NavigationDestination(icon: Icon(it.$1), label: it.$2),
+              for (final it in _items) NavigationDestination(icon: Icon(it.$1), label: tr(state.lang, it.$2)),
             ],
           ),
         );

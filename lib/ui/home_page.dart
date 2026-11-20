@@ -2,13 +2,14 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../core/calc.dart';
+import '../core/i18n.dart';
 import '../core/store.dart';
 import '../core/sun.dart';
-import 'settings_sheet.dart';
+import 'location_sheet.dart';
+import 'profile_dialog.dart';
+import 'settings_dialog.dart';
+import 'sun_art.dart';
 import 'theme.dart';
-
-const _wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const _mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 String _two(int n) => n.toString().padLeft(2, '0');
 String clock12(DateTime d, {bool seconds = false}) {
@@ -26,6 +27,9 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   Timer? _tick;
   DateTime _now = DateTime.now();
+  DayInfo? _info;
+  int _infoKey = -1;
+  bool _cloudNotified = false;
 
   @override
   void initState() {
@@ -34,8 +38,7 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
       setState(() => _now = DateTime.now());
       final s = widget.state;
-      // hourly auto-sync
-      if (s.site.auto && !s.syncing && (s.lastSync == null || _now.difference(s.lastSync!).inMinutes >= 60)) {
+      if (s.prefs.autoSync && !s.syncing && (s.lastSync == null || _now.difference(s.lastSync!).inMinutes >= 60)) {
         s.sync();
       }
     });
@@ -47,17 +50,26 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
+  DayInfo _dayInfo(AppState s) {
+    final key = _now.day * 100000 + (s.site.lat * 100).round() * 7 + (s.site.lon * 100).round();
+    if (_info == null || key != _infoKey) {
+      _info = dayInfo(_now, s.site.lat, s.site.lon);
+      _infoKey = key;
+    }
+    return _info!;
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
     final site = s.site;
     final now = _now;
-    final info = dayInfo(now, site.lat, site.lon);
+    final info = _dayInfo(s);
     final pos = solarPosition(now, site.lat, site.lon);
     final irr = s.irr;
     final hourly = irr?.hourly ?? const <double>[];
     final psh = hourly.fold(0.0, (a, b) => a + b) / 1000;
-    final potential = site.kwp * psh * kPerformanceRatio;
+    final potential = site.kwp * psh * s.pr;
     final hNow = now.hour + now.minute / 60;
     var soFar = 0.0;
     for (var h = 0; h < hourly.length; h++) {
@@ -67,259 +79,281 @@ class _HomePageState extends State<HomePage> {
         soFar += hourly[h] * (hNow - h);
       }
     }
-    soFar = soFar / 1000 * site.kwp * kPerformanceRatio;
-    final live = irr == null ? 0.0 : site.kwp * irr.ghi / 1000 * kPerformanceRatio;
+    soFar = soFar / 1000 * site.kwp * s.pr;
+    final live = irr == null ? 0.0 : site.kwp * irr.ghi / 1000 * s.pr;
     final load = s.dailyLoad;
     final act = s.activeNow(now);
     final net = potential - load;
     final used = math.min(potential, load);
     final offset = load > 0 ? math.min(100, (potential / load * 100).round()) : 0;
+    final monthPsh = s.monthly?.forMonth(now.month);
+    final lang = s.lang;
+    final t = s.t;
+    final night = C.dark;
+    final progress = arcProgress(now, info.rise, info.set, night: night);
+    final cloud = irr?.cloud ?? 0;
+    final skyKey = cloud < 20 ? 'clear_sky' : (cloud < 60 ? 'partly_cloudy' : 'overcast');
+    final due = s.cleanDueInDays;
+
+    // one-time cloud alert while the app is open
+    if (s.prefs.cloudAlerts && irr != null && irr.live && pos.alt > 15) {
+      final clear = clearSky(pos.alt).ghi;
+      final drop = clear > 0 ? 1 - irr.ghi / clear : 0;
+      if (drop > 0.5 && !_cloudNotified) {
+        _cloudNotified = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) toast(context, t('cloud_alert_msg'));
+        });
+      } else if (drop < 0.3) {
+        _cloudNotified = false;
+      }
+    }
+
+    final subtitle = site.label.isEmpty ? (s.profile.address) : site.label;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        // header
+        // ---------- header ----------
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(children: [
-            const Icon(Icons.location_on, color: Color(0xFFF97316), size: 38),
-            const SizedBox(width: 10),
             Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(site.city, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800), overflow: TextOverflow.ellipsis),
-                Text(site.label, style: const TextStyle(color: C.mute, fontSize: 14.5), overflow: TextOverflow.ellipsis),
-              ]),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => showLocationSheet(context, s),
+                child: Row(children: [
+                  Icon(Icons.location_on, color: C.orange, size: 34),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Flexible(
+                          child: Text(site.city,
+                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                              overflow: TextOverflow.ellipsis, maxLines: 1),
+                        ),
+                        Icon(Icons.chevron_right, color: C.mute),
+                      ]),
+                      Text(subtitle, style: TextStyle(color: C.mute, fontSize: 12.5), overflow: TextOverflow.ellipsis, maxLines: 1),
+                    ]),
+                  ),
+                ]),
+              ),
             ),
+            const SizedBox(width: 6),
+            _RoundBtn(night ? Icons.wb_sunny_outlined : Icons.nightlight_outlined, () => s.setDark(!night),
+                color: night ? C.sun : C.purple),
             const SizedBox(width: 8),
-            _RoundBtn(Icons.settings_outlined, () => showSettingsSheet(context, s)),
+            _RoundBtn(Icons.settings_outlined, () => showSettingsDialog(context, s), color: C.blue),
+            const SizedBox(width: 8),
+            _Avatar(s.profile.name, () => showProfileDialog(context, s)),
           ]),
         ),
-        // date + clock
+        // ---------- date + live clock ----------
         Panel(
-          radius: 24,
+          radius: 22,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(children: [
-            const Icon(Icons.calendar_month_outlined, color: C.blue),
+            Icon(Icons.calendar_month_outlined, color: C.blue),
             const SizedBox(width: 10),
             Expanded(
-              child: Text('${_wd[now.weekday - 1]}, ${_mo[now.month - 1]} ${now.day}, ${now.year}',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              child: Text(datePill(lang, now), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(color: const Color(0xFF0E1A33), borderRadius: BorderRadius.circular(99), border: Border.all(color: C.line)),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(99), border: Border.all(color: C.line)),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const _Dot(C.green, 9),
-                const SizedBox(width: 7),
-                Text(clock12(now, seconds: true),
-                    style: const TextStyle(fontFamilyFallback: kMono, color: C.sky, fontWeight: FontWeight.w600, fontSize: 14)),
+                _Dot(C.green, 8),
                 const SizedBox(width: 6),
-                const Text('LIVE', style: TextStyle(color: C.mute, fontSize: 11, fontWeight: FontWeight.w600)),
+                Text(clock12(now, seconds: true), style: TextStyle(fontFamilyFallback: kMono, color: C.sky, fontWeight: FontWeight.w600, fontSize: 13)),
               ]),
             ),
           ]),
         ),
-        const SizedBox(height: 14),
-        // auto sync
+        const SizedBox(height: 12),
+        // ---------- hourly auto-sync ----------
         Panel(
-          radius: 24,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 10, runSpacing: 4, children: [
-              const _Dot(Color(0xFF0FA27A), 24),
-              const Text('Hourly Auto-Sync', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-              Text(
-                s.lastSync == null ? 'Not synced' : 'Updated: ${_two(s.lastSync!.hour)}:${_two(s.lastSync!.minute)}',
-                style: const TextStyle(fontFamilyFallback: kMono, color: C.mute, fontSize: 13),
-              ),
-            ]),
-            const SizedBox(height: 12),
-            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-              Switch(
-                value: site.auto,
-                onChanged: (v) {
-                  site.auto = v;
-                  s.saveSite();
-                },
-              ),
-              const SizedBox(width: 12),
-              FilledButton.icon(
-                onPressed: s.syncing
-                    ? null
-                    : () async {
-                        await s.sync();
-                        if (context.mounted) {
-                          toast(context, (s.irr?.live ?? false) ? 'Synced with live weather data' : 'Offline: using clear-sky model');
-                        }
-                      },
-                icon: s.syncing
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.4))
-                    : const Icon(Icons.sync),
-                label: const Text('Sync Now', style: TextStyle(fontWeight: FontWeight.w700)),
-                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14)),
-              ),
-            ]),
+          radius: 22,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(color: C.chipGreen, shape: BoxShape.circle),
+              child: Icon(Icons.wifi_tethering, color: C.green, size: 22),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(t('hourly_sync'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                Row(children: [
+                  Icon(Icons.schedule, size: 13, color: C.mute),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      s.lastSync == null ? '--:--' : '${t('updated')}: ${_two(s.lastSync!.hour)}:${_two(s.lastSync!.minute)}',
+                      style: TextStyle(fontFamilyFallback: kMono, color: C.mute, fontSize: 12),
+                    ),
+                  ),
+                ]),
+              ]),
+            ),
+            Switch(
+              value: s.prefs.autoSync,
+              onChanged: (v) {
+                s.prefs.autoSync = v;
+                s.savePrefs();
+              },
+            ),
+            const SizedBox(width: 4),
+            FilledButton.icon(
+              onPressed: s.syncing
+                  ? null
+                  : () async {
+                      await s.sync();
+                      if (context.mounted) toast(context, '${t('updated')} ${clock12(DateTime.now())}');
+                    },
+              icon: s.syncing
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2.2))
+                  : const Icon(Icons.sync, size: 18),
+              label: Text(t('sync_now'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12)),
+            ),
           ]),
         ),
-        const SizedBox(height: 14),
-        // sun card
+        const SizedBox(height: 12),
+        // ---------- sun card ----------
         Panel(
           radius: 24,
-          padding: const EdgeInsets.fromLTRB(16, 18, 14, 14),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          padding: const EdgeInsets.fromLTRB(16, 16, 12, 12),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             Expanded(
-              flex: 42,
+              flex: 40,
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('▲  Altitude', style: TextStyle(color: C.mute, fontSize: 14)),
-                const SizedBox(height: 4),
-                Text('${pos.alt >= 0 ? '+' : ''}${pos.alt.toStringAsFixed(2)}°',
-                    style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800)),
-                const Divider(color: C.line, height: 22),
-                const Text('☀  Sun Status', style: TextStyle(color: C.mute, fontSize: 14)),
-                const SizedBox(height: 4),
+                Row(children: [
+                  Icon(Icons.change_history, size: 14, color: C.blue),
+                  const SizedBox(width: 4),
+                  Flexible(child: Text(t('altitude'), style: TextStyle(color: C.mute, fontSize: 13))),
+                ]),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text('${pos.alt >= 0 ? '+' : ''}${pos.alt.toStringAsFixed(2)}°',
+                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+                ),
+                Divider(color: C.line, height: 20),
+                Text(t('sun_status'), style: TextStyle(color: C.mute, fontSize: 13)),
+                const SizedBox(height: 2),
                 Row(children: [
                   Flexible(
-                    child: Text(pos.alt > 0 ? compass(pos.az) : 'Below horizon',
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                    child: Text(pos.alt > 0 ? compassName(lang, pos.az) : t('below_horizon'),
+                        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
                   ),
-                  const SizedBox(width: 8),
-                  const _Dot(C.sun, 14),
+                  const SizedBox(width: 6),
+                  _Dot(pos.alt > 0 ? C.sun : C.mute, 11),
                 ]),
                 const SizedBox(height: 8),
-                Text('${fmt1(soFar * kCo2PerKwh)} kg CO₂ avoided',
-                    style: const TextStyle(fontFamilyFallback: kMono, color: C.green, fontSize: 12.5)),
+                Text('${fmt1(soFar * kCo2PerKwh)} ${t('co2_avoided')}',
+                    style: TextStyle(fontFamilyFallback: kMono, color: C.green, fontSize: 11.5)),
               ]),
             ),
+            const SizedBox(width: 10),
             Expanded(
-              flex: 58,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                AspectRatio(aspectRatio: 320 / 190, child: CustomPaint(painter: _SunArc(now, info))),
-                const SizedBox(height: 4),
+              flex: 60,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                AspectRatio(
+                  aspectRatio: 320 / 190,
+                  child: CustomPaint(painter: SunArtPainter(night: night, t: progress, dark: C.dark)),
+                ),
+                const SizedBox(height: 6),
                 Text.rich(
                   TextSpan(children: [
-                    const TextSpan(text: 'Peak sunlight at : '),
+                    TextSpan(text: '${t('peak_at')} : '),
                     TextSpan(
                         text: info.noon == null ? '-' : clock12(info.noon!),
-                        style: const TextStyle(color: Color(0xFFFB8A2E), fontWeight: FontWeight.w800)),
+                        style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
                   ]),
-                  style: const TextStyle(fontSize: 12.5),
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontSize: 12),
                 ),
               ]),
             ),
           ]),
         ),
-        const SizedBox(height: 18),
-        // heading
-        Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          const Expanded(
-            flex: 11,
-            child: Text("Today's Energy Balance & Financial Overview",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, height: 1.2)),
-          ),
-          const SizedBox(width: 10),
-          const Expanded(flex: 9, child: Text('· Tap any metric for dedicated analysis', style: TextStyle(color: C.mute, fontSize: 13))),
-        ]),
+        const SizedBox(height: 16),
+        // ---------- heading ----------
+        Text(t('energy_balance'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, height: 1.25)),
+        const SizedBox(height: 2),
+        Text(t('tap_metric'), style: TextStyle(color: C.mute, fontSize: 12.5)),
         const SizedBox(height: 10),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(color: const Color(0xFF131C31), borderRadius: BorderRadius.circular(18)),
+          decoration: BoxDecoration(color: C.chip, borderRadius: BorderRadius.circular(18)),
           child: Row(children: [
-            Expanded(child: Text(irr == null ? 'Waiting for sync' : skyLabel(irr.cloud), style: const TextStyle(fontWeight: FontWeight.w600))),
+            Icon(night ? Icons.nightlight_outlined : Icons.wb_cloudy_outlined, size: 18, color: C.mute),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(irr == null ? '…' : '${t(skyKey)}${cloud < 20 ? ' / Opt…' : ''}',
+                  style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+            ),
             Column(children: [
-              Text(psh > 0 ? psh.toStringAsFixed(1) : '-',
-                  style: const TextStyle(fontFamilyFallback: kMono, color: C.amber, fontSize: 18, fontWeight: FontWeight.w700)),
-              const Text('PSH', style: TextStyle(fontFamilyFallback: kMono, color: C.amber, fontSize: 12)),
+              Text((monthPsh ?? psh) > 0 ? (monthPsh ?? psh).toStringAsFixed(1) : '-',
+                  style: TextStyle(fontFamilyFallback: kMono, color: C.amber, fontSize: 17, fontWeight: FontWeight.w700)),
+              Text('PSH', style: TextStyle(fontFamilyFallback: kMono, color: C.amber, fontSize: 11)),
             ]),
           ]),
         ),
         const SizedBox(height: 12),
-        IntrinsicHeight(
-          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Expanded(
-              child: _Metric(
-                icon: Icons.wb_sunny_outlined,
-                iconBg: const Color(0xFF2A1F12),
-                iconColor: C.sun,
-                name: 'Potential Gain',
-                value: potential < 100 ? potential.toStringAsFixed(1) : potential.round().toString(),
-                unit: 'kWh',
-                unitColor: C.amber,
-                desc: 'Yield from ${site.kwp} kWp plant',
-                foot1: '${live.toStringAsFixed(2)} kW live',
-                foot2: '${(irr?.ghi ?? 0).round()} W/m²',
-                onTap: () => s.setTab(3),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _Metric(
-                icon: Icons.monitor_heart_outlined,
-                iconBg: const Color(0xFF0D2238),
-                iconColor: C.sky,
-                name: 'Actual Usage',
-                value: load.toStringAsFixed(1),
-                unit: 'kWh',
-                unitColor: C.sky,
-                desc: 'Household consumption load',
-                foot1: '${act.kw.toStringAsFixed(2)} kW active',
-                foot2: '${s.appliances.length} appliances',
-                onTap: () => s.setTab(2),
-              ),
-            ),
-          ]),
+        // ---------- 4 display-only metric cards ----------
+        _pair(
+          _Metric(
+            icon: Icons.wb_sunny_outlined, iconBg: C.chipSun, iconColor: C.sun,
+            name: t('potential_gain'),
+            value: potential < 100 ? potential.toStringAsFixed(1) : potential.round().toString(),
+            unit: 'kWh', unitColor: C.amber,
+            foot1: '${live.toStringAsFixed(2)} kW', foot2: '${(irr?.ghi ?? 0).round()} W/m²',
+            desc: '${site.kwp} kWp',
+          ),
+          _Metric(
+            icon: Icons.monitor_heart_outlined, iconBg: C.chipBlue, iconColor: C.sky,
+            name: t('actual_usage'), value: load.toStringAsFixed(1), unit: 'kWh', unitColor: C.sky,
+            foot1: '${act.kw.toStringAsFixed(2)} kW', foot2: '${s.appliances.length}', desc: t('load'),
+          ),
         ),
         const SizedBox(height: 12),
-        IntrinsicHeight(
-          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Expanded(
-              child: _Metric(
-                icon: Icons.trending_down,
-                iconBg: const Color(0xFF2A1F12),
-                iconColor: C.sun,
-                name: net >= 0 ? 'Grid Surplus' : 'Grid Deficit',
-                value: '${net >= 0 ? '+' : '-'}${net.abs().toStringAsFixed(1)}',
-                unit: 'kWh',
-                unitColor: C.amber,
-                desc: net >= 0 ? 'Surplus exported to grid' : 'Deficit drawn from grid',
-                foot1: 'Offset: $offset%',
-                foot2: net >= 0 ? 'Self-sufficient' : 'Grid Reliance',
-                foot2Color: C.amber,
-                onTap: () => s.setTab(2),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _Metric(
-                icon: Icons.auto_awesome,
-                iconBg: const Color(0xFF221941),
-                iconColor: C.purple,
-                name: 'Financial Value',
-                value: '₹${groupIndian(used * site.tariff)}',
-                unit: 'saved',
-                unitColor: C.green,
-                desc: '@ ₹${site.tariff}/kWh tariff',
-                foot1: '${fmt1(potential * kCo2PerKwh)} kg CO₂',
-                foot2: 'Clean offset',
-                foot2Color: C.green,
-                onTap: () => s.setTab(1),
-              ),
-            ),
-          ]),
+        _pair(
+          _Metric(
+            icon: Icons.trending_down, iconBg: C.chipSun, iconColor: C.sun,
+            name: t('grid_deficit'),
+            value: '${net >= 0 ? '+' : '-'}${net.abs().toStringAsFixed(1)}', unit: 'kWh', unitColor: C.amber,
+            foot1: '$offset %', foot2: net >= 0 ? t('net_export') : t('net_import'), foot2Color: C.amber,
+            desc: s.discom.name,
+          ),
+          _Metric(
+            icon: Icons.auto_awesome, iconBg: C.chipPurple, iconColor: C.purple,
+            name: t('financial_value'), value: '₹${groupIndian(used * s.unitPrice)}', unit: '', unitColor: C.green,
+            foot1: '${fmt1(potential * kCo2PerKwh)} kg CO₂', foot2: '₹${s.unitPrice.toStringAsFixed(2)}/kWh', foot2Color: C.green,
+            desc: s.tariffCat.label,
+          ),
         ),
         const SizedBox(height: 14),
-        // balance
+        // ---------- solar vs load ----------
         Panel(
           radius: 24,
           child: Column(children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               Text.rich(TextSpan(children: [
-                const TextSpan(text: 'Solar: '),
+                TextSpan(text: '${t('solar_gen')}: '),
                 TextSpan(text: potential.toStringAsFixed(1), style: const TextStyle(fontFamilyFallback: kMono, fontWeight: FontWeight.w700)),
                 const TextSpan(text: ' kWh'),
-              ]), style: const TextStyle(fontSize: 16)),
+              ]), style: const TextStyle(fontSize: 14)),
               Text.rich(TextSpan(children: [
-                const TextSpan(text: 'Load: '),
+                TextSpan(text: '${t('load')}: '),
                 TextSpan(text: load.toStringAsFixed(1), style: const TextStyle(fontFamilyFallback: kMono, fontWeight: FontWeight.w700)),
                 const TextSpan(text: ' kWh'),
-              ]), style: const TextStyle(fontSize: 16)),
+              ]), style: const TextStyle(fontSize: 14)),
             ]),
             const SizedBox(height: 10),
             Row(children: [
@@ -328,22 +362,43 @@ class _HomePageState extends State<HomePage> {
               Expanded(flex: math.max(1, (load * 100).round()), child: Container(height: 12, decoration: BoxDecoration(color: const Color(0xFF0A9BFF), borderRadius: BorderRadius.circular(99)))),
             ]),
             const SizedBox(height: 10),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text(irr == null ? '-' : '${irr.dni.round()} DNI · ${irr.ghi.round()} GHI', style: const TextStyle(color: C.mute, fontSize: 13.5)),
-              Text('${net >= 0 ? '+' : '-'}${net.abs().toStringAsFixed(1)} kWh Net ${net >= 0 ? 'Export' : 'Import'}',
-                  style: const TextStyle(color: C.amber, fontWeight: FontWeight.w600, fontSize: 13.5)),
+            Wrap(alignment: WrapAlignment.spaceBetween, spacing: 12, runSpacing: 4, children: [
+              Text(irr == null ? '-' : '${irr.dni.round()} DNI · ${irr.ghi.round()} GHI', style: TextStyle(color: C.mute, fontSize: 13)),
+              Text('${net >= 0 ? '+' : '-'}${net.abs().toStringAsFixed(1)} kWh ${net >= 0 ? t('net_export') : t('net_import')}',
+                  style: TextStyle(color: C.amber, fontWeight: FontWeight.w600, fontSize: 13)),
             ]),
             const SizedBox(height: 6),
             Align(
               alignment: Alignment.centerLeft,
-              child: Text('Data: ${irr == null ? '-' : (irr.live ? 'LIVE' : 'MODEL')} · Plant performance ratio 84%',
-                  style: const TextStyle(color: C.mute, fontSize: 11.5)),
+              child: Text('${irr == null ? '-' : (irr.live ? 'LIVE' : 'MODEL')} · ${t('solar_pr')} ${(s.pr * 100).toStringAsFixed(1)}%',
+                  style: TextStyle(color: C.mute, fontSize: 11.5)),
             ),
           ]),
         ),
+        if (due != null && due <= 7) ...[
+          const SizedBox(height: 12),
+          Panel(
+            radius: 20,
+            border: C.amber,
+            child: Row(children: [
+              Icon(Icons.cleaning_services_outlined, color: C.amber),
+              const SizedBox(width: 10),
+              Expanded(child: Text('${t('to_clean')}${due > 0 ? ' · $due d' : ''}', style: const TextStyle(fontWeight: FontWeight.w700))),
+              TextButton(onPressed: s.markCleaned, child: const Text('✓')),
+            ]),
+          ),
+        ],
       ],
     );
   }
+
+  Widget _pair(Widget a, Widget b) => IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(child: a),
+          const SizedBox(width: 12),
+          Expanded(child: b),
+        ]),
+      );
 }
 
 class _Dot extends StatelessWidget {
@@ -357,21 +412,64 @@ class _Dot extends StatelessWidget {
 class _RoundBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _RoundBtn(this.icon, this.onTap);
+  final Color color;
+  const _RoundBtn(this.icon, this.onTap, {required this.color});
   @override
   Widget build(BuildContext context) => Material(
-        color: const Color(0xFF101A30),
-        shape: const CircleBorder(side: BorderSide(color: C.line)),
-        child: InkWell(customBorder: const CircleBorder(), onTap: onTap, child: SizedBox(width: 52, height: 52, child: Icon(icon, color: C.blue, size: 26))),
+        color: C.card,
+        shape: CircleBorder(side: BorderSide(color: C.line)),
+        child: InkWell(customBorder: const CircleBorder(), onTap: onTap, child: SizedBox(width: 42, height: 42, child: Icon(icon, color: color, size: 22))),
       );
 }
 
+class _Avatar extends StatelessWidget {
+  final String name;
+  final VoidCallback onTap;
+  const _Avatar(this.name, this.onTap);
+  @override
+  Widget build(BuildContext context) {
+    final initial = name.trim().isEmpty ? null : name.trim()[0].toUpperCase();
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 46,
+        height: 48,
+        child: Stack(clipBehavior: Clip.none, children: [
+          Positioned(
+            top: 0,
+            left: 2,
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(colors: [Color(0xFFFB8A2E), Color(0xFFF5A524)]),
+                border: Border.all(color: C.line, width: 2),
+              ),
+              alignment: Alignment.center,
+              child: initial == null
+                  ? const Icon(Icons.person, color: Colors.white, size: 24)
+                  : Text(initial, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
+            ),
+          ),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Text('★★★', textAlign: TextAlign.center, style: TextStyle(color: C.sun, fontSize: 9, height: 1)),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Display-only metric card (no tap action).
 class _Metric extends StatelessWidget {
   final IconData icon;
   final Color iconBg, iconColor, unitColor;
   final String name, value, unit, desc, foot1, foot2;
-  final Color foot2Color;
-  final VoidCallback onTap;
+  final Color? foot2Color;
   const _Metric({
     required this.icon,
     required this.iconBg,
@@ -383,92 +481,47 @@ class _Metric extends StatelessWidget {
     required this.desc,
     required this.foot1,
     required this.foot2,
-    this.foot2Color = C.mute,
-    required this.onTap,
+    this.foot2Color,
   });
   @override
   Widget build(BuildContext context) {
     return Panel(
       radius: 24,
       padding: const EdgeInsets.all(14),
-      onTap: onTap,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(14)),
-            child: Icon(icon, color: iconColor, size: 24),
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(13)),
+            child: Icon(icon, color: iconColor, size: 22),
           ),
           const SizedBox(width: 6),
           Expanded(
-            child: Text('$name ›', textAlign: TextAlign.right, style: const TextStyle(color: Color(0xFFB5C0D6), fontWeight: FontWeight.w700, fontSize: 14)),
+            child: Text(name, textAlign: TextAlign.right, maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: C.mute, fontWeight: FontWeight.w700, fontSize: 13)),
           ),
         ]),
-        const SizedBox(height: 14),
+        const SizedBox(height: 12),
         FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
           child: Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-            Text(value, style: const TextStyle(fontFamilyFallback: kMono, fontSize: 34, fontWeight: FontWeight.w600, letterSpacing: -1)),
+            Text(value, style: const TextStyle(fontFamilyFallback: kMono, fontSize: 30, fontWeight: FontWeight.w600, letterSpacing: -1)),
             const SizedBox(width: 6),
-            Text(unit, style: TextStyle(color: unitColor, fontWeight: FontWeight.w800, fontSize: 18)),
+            Text(unit, style: TextStyle(color: unitColor, fontWeight: FontWeight.w800, fontSize: 16)),
           ]),
         ),
-        const SizedBox(height: 4),
-        Text(desc, style: const TextStyle(color: Color(0xFF9AA6BF), fontSize: 14)),
-        const Spacer(),
+        const SizedBox(height: 2),
+        Text(desc, style: TextStyle(color: C.mute, fontSize: 12.5), maxLines: 1, overflow: TextOverflow.ellipsis),
         const SizedBox(height: 10),
-        const Divider(color: C.line, height: 1),
+        Divider(color: C.line, height: 1),
         const SizedBox(height: 8),
         Wrap(spacing: 10, runSpacing: 2, children: [
-          Text(foot1, style: const TextStyle(fontFamilyFallback: kMono, color: Color(0xFF9AA6BF), fontSize: 12)),
-          Text(foot2, style: TextStyle(fontFamilyFallback: kMono, color: foot2Color, fontSize: 12)),
+          Text(foot1, style: TextStyle(fontFamilyFallback: kMono, color: C.mute, fontSize: 11.5)),
+          Text(foot2, style: TextStyle(fontFamilyFallback: kMono, color: foot2Color ?? C.mute, fontSize: 11.5)),
         ]),
       ]),
     );
   }
-}
-
-class _SunArc extends CustomPainter {
-  final DateTime now;
-  final DayInfo info;
-  _SunArc(this.now, this.info);
-  @override
-  void paint(Canvas canvas, Size size) {
-    final sx = size.width / 320, sy = size.height / 190;
-    canvas.scale(sx, sy);
-    const cx = 160.0, cy = 170.0, r = 140.0;
-    final rise = info.rise, set = info.set;
-    var f = 0.0;
-    var day = false;
-    if (rise != null && set != null) {
-      final total = set.difference(rise).inSeconds;
-      f = total > 0 ? (now.difference(rise).inSeconds / total).clamp(0.0, 1.0).toDouble() : 0.0;
-      day = !now.isBefore(rise) && !now.isAfter(set);
-    }
-    // dashed arc
-    final arc = Path()..addArc(Rect.fromCircle(center: const Offset(cx, cy), radius: r), math.pi, math.pi);
-    final dashPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.9)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.butt;
-    for (final m in arc.computeMetrics()) {
-      var d = 0.0;
-      while (d < m.length) {
-        canvas.drawPath(m.extractPath(d, math.min(d + 7, m.length)), dashPaint);
-        d += 16;
-      }
-    }
-    canvas.drawCircle(const Offset(cx + r, cy), 12, Paint()..color = const Color(0xFF3A2A22));
-    final x = cx - r * math.cos(math.pi * f), y = cy - r * math.sin(math.pi * f);
-    if (day) canvas.drawCircle(Offset(x, y), 26, Paint()..color = const Color(0xFFF59E0B).withValues(alpha: 0.18));
-    canvas.drawCircle(Offset(x, y), 11, Paint()..color = day ? const Color(0xFFF97316) : const Color(0xFF475569));
-    canvas.drawCircle(Offset(x, y), 5, Paint()..color = const Color(0xFF0B1220));
-    canvas.drawCircle(Offset(x, y), 3, Paint()..color = day ? const Color(0xFFFDBA74) : const Color(0xFF94A3B8));
-  }
-
-  @override
-  bool shouldRepaint(covariant _SunArc old) => true;
 }

@@ -28,6 +28,13 @@ jobs:
       - name: Analyze (errors fail the build)
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
       - run: flutter test
+      - name: Upload layout screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: screenshots/
+          if-no-files-found: ignore
 
   android:
     name: Android APK

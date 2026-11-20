@@ -33,7 +33,7 @@ class AppliancePage extends StatelessWidget {
         ]),
         Panel(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Solar vs load by hour', style: TextStyle(color: C.amber, fontSize: 15, fontWeight: FontWeight.w800)),
+            Text('Solar vs load by hour', style: TextStyle(color: C.amber, fontSize: 15, fontWeight: FontWeight.w800)),
             const SizedBox(height: 10),
             BarChart(
               series: [BarSeries('Solar', sh, const Color(0xFFF59E0B)), BarSeries('Load', lh, const Color(0xFF0A9BFF))],
@@ -51,9 +51,9 @@ class AppliancePage extends StatelessWidget {
         const SizedBox(height: 14),
         Panel(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Appliances', style: TextStyle(color: C.amber, fontSize: 15, fontWeight: FontWeight.w800)),
+            Text('Appliances', style: TextStyle(color: C.amber, fontSize: 15, fontWeight: FontWeight.w800)),
             const SizedBox(height: 10),
-            if (state.appliances.isEmpty) const Text('No appliances. Add one below.', style: TextStyle(color: C.mute)),
+            if (state.appliances.isEmpty) Text('No appliances. Add one below.', style: TextStyle(color: C.mute)),
             for (final a in state.appliances)
               _ApplianceRow(
                 key: ValueKey(a.id),
@@ -149,14 +149,14 @@ class _ApplianceRowState extends State<_ApplianceRow> {
     final a = widget.a;
     return Container(
       padding: const EdgeInsets.only(top: 12, bottom: 4),
-      decoration: const BoxDecoration(border: Border(top: BorderSide(color: C.line))),
+      decoration: BoxDecoration(border: Border(top: BorderSide(color: C.line))),
       child: Column(children: [
         TextField(controller: name, onChanged: (_) => _commit(), style: const TextStyle(fontWeight: FontWeight.w700), decoration: const InputDecoration(labelText: 'Appliance')),
         const SizedBox(height: 10),
         Row(children: [_n('Watts', watts, decimal: true), _n('Qty', qty), _n('Hours/day', hours, decimal: true), _n('Start hr', start)]),
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text('${(a.watts * a.qty * a.hours / 1000).toStringAsFixed(2)} kWh/day', style: const TextStyle(color: C.mute, fontSize: 13)),
-          TextButton(onPressed: widget.onDelete, child: const Text('Remove', style: TextStyle(color: C.red))),
+          Text('${(a.watts * a.qty * a.hours / 1000).toStringAsFixed(2)} kWh/day', style: TextStyle(color: C.mute, fontSize: 13)),
+          TextButton(onPressed: widget.onDelete, child: Text('Remove', style: TextStyle(color: C.red))),
         ]),
       ]),
     );

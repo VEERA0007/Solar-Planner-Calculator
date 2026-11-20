@@ -12,17 +12,21 @@ class SolarPage extends StatelessWidget {
     final site = state.site;
     final hk = state.solarHourlyKw();
     final psh = state.irr?.psh ?? 0.0;
+    final mp = state.monthly;
+    final pr = state.pr;
+    final age = state.profile.commissionDate == null ? 0.0 : DateTime.now().difference(state.profile.commissionDate!).inDays / 365.25;
+    final health = (1 - 0.005 * age).clamp(0.5, 1.0).toDouble(); // 0.5%/yr degradation
     final daily = hk.fold(0.0, (a, b) => a + b);
     final peakKw = hk.fold(0.0, (a, b) => a > b ? a : b);
     final year = DateTime.now().year;
-    final monthly = List.generate(12, (i) => site.kwp * kMonthPsh[i] * kPerformanceRatio * DateTime(year, i + 2, 0).day);
+    final monthly = List.generate(12, (i) => site.kwp * (mp?.psh[i] ?? kMonthPshHyd[i]) * pr * health * DateTime(year, i + 2, 0).day);
     final annual = monthly.fold(0.0, (a, b) => a + b);
     const months = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
-    const title = TextStyle(color: C.amber, fontSize: 15, fontWeight: FontWeight.w800);
+    final title = TextStyle(color: C.amber, fontSize: 15, fontWeight: FontWeight.w800);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       children: [
-        const PageHead('Solar Analysis', 'Generation forecast for your plant'),
+        PageHead(state.t('solar'), '${state.site.city} · ${state.profile.panel.isEmpty ? 'Generation forecast for your plant' : state.profile.panel}'),
         StatGrid([
           StatTile('Plant size', '${site.kwp} kWp'),
           StatTile("Today's yield", '${fmt1(daily)} kWh'),
@@ -31,7 +35,7 @@ class SolarPage extends StatelessWidget {
         ]),
         Panel(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Today by hour (kW)', style: title),
+            Text('Today by hour (kW)', style: title),
             const SizedBox(height: 10),
             BarChart(series: [BarSeries('kW', hk, const Color(0xFFF59E0B))], labels: List.generate(24, (i) => i % 3 == 0 ? '$i' : null), highlight: DateTime.now().hour),
           ]),
@@ -39,11 +43,11 @@ class SolarPage extends StatelessWidget {
         const SizedBox(height: 14),
         Panel(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Typical monthly yield (kWh)', style: title),
+            Text('Typical monthly yield (kWh)', style: title),
             const SizedBox(height: 10),
             BarChart(series: [BarSeries('kWh', monthly, const Color(0xFF38BDF8))], labels: months, highlight: DateTime.now().month - 1),
             const SizedBox(height: 6),
-            const Text('Based on typical monthly sunshine for Hyderabad and an 84% performance ratio.', style: TextStyle(color: C.mute, fontSize: 12.5)),
+            Text('Long-term average sunshine for ${site.city}${mp != null && mp.fetched ? '' : ' (estimate while offline)'}, performance ratio ${(pr * 100).toStringAsFixed(1)}%${age > 0 ? ', plant age ${age.toStringAsFixed(1)} y' : ''}.', style: TextStyle(color: C.mute, fontSize: 12.5)),
           ]),
         ),
         const SizedBox(height: 14),

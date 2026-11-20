@@ -44,6 +44,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
   void initState() {
     super.initState();
     _fill(EstimateInput());
+    final p = widget.state.profile;
+    usc.text = p.serviceNo;
+    name.text = p.name;
+    phone.text = p.mobile;
+    address.text = p.address;
   }
 
   void _fill(EstimateInput d) {
@@ -86,7 +91,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
       areaPerKw: or('areaPerKw', d.areaPerKw),
       degradation: or('degradation', d.degradation),
       escalation: or('escalation', d.escalation),
-      category: category,
+      category: widget.state.prefs.category == 'domestic' ? 'residential' : 'commercial',
       subsidy: subsidy,
     );
   }
@@ -158,8 +163,18 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final inp = _readInput();
     final use = inp.mode == 'bill' ? inp.monthlyBill : inp.monthlyUnits;
     if (!(use > 0)) return toast(context, 'Enter monthly units or bill');
-    if (!(inp.tariff > 0)) return toast(context, 'Enter the tariff (Rs./unit)');
     final s = widget.state;
+    final plan = s.tariffCat;
+    // slab tariff: units from the bill, and the average rate actually avoided by solar
+    final units = inp.mode == 'bill' ? plan.unitsForBill(inp.monthlyBill) : inp.monthlyUnits;
+    final off = units * inp.coverage.clamp(0, 100) / 100;
+    final eff = off > 0 ? (plan.bill(units) - plan.bill(units - off)) / off : plan.marginal(units);
+    inp
+      ..monthlyBill = plan.bill(units)
+      ..mode = 'units'
+      ..monthlyUnits = units
+      ..tariff = double.parse(eff.toStringAsFixed(2))
+      ..yieldPerKwDay = double.parse(s.locationYield.toStringAsFixed(2));
     s.input = inp;
     s.customer = _readCustomer();
     s.result = calculate(inp);
@@ -205,6 +220,14 @@ class _EstimatorPageState extends State<EstimatorPage> {
     await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
+  Widget _ro(String label, String value, {double top = 10}) => Padding(
+        padding: EdgeInsets.only(top: top),
+        child: InputDecorator(
+          decoration: InputDecoration(labelText: label, suffixIcon: Icon(Icons.lock_outline, size: 16, color: C.mute)),
+          child: Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
+      );
+
   Widget _tf(String key, {double top = 10}) => Padding(
         padding: EdgeInsets.only(top: top),
         child: TextField(
@@ -216,7 +239,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   Widget _h(String t) => Padding(
         padding: const EdgeInsets.only(bottom: 4),
-        child: Text(t, style: const TextStyle(color: C.amber, fontSize: 15, fontWeight: FontWeight.w800)),
+        child: Text(t, style: TextStyle(color: C.amber, fontSize: 15, fontWeight: FontWeight.w800)),
       );
 
   @override
@@ -286,20 +309,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
               onSelectionChanged: (v) => setState(() => mode = v.first),
             ),
             _tf(mode == 'units' ? 'monthlyUnits' : 'monthlyBill'),
-            Row(children: [Expanded(child: _tf('tariff')), const SizedBox(width: 10), Expanded(child: _tf('coverage'))]),
+            Row(children: [Expanded(child: _ro('Tariff (Rs./unit)', widget.state.unitPrice.toStringAsFixed(2))), const SizedBox(width: 10), Expanded(child: _tf('coverage'))]),
+            Padding(padding: const EdgeInsets.only(top: 6, left: 4), child: Text('${widget.state.slabText} · ${widget.state.discom.name}. Change state, grid or category in Settings.', style: TextStyle(color: C.mute, fontSize: 12))),
             const SizedBox(height: 10),
             Row(children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: category,
-                  decoration: const InputDecoration(labelText: 'Category'),
-                  items: const [
-                    DropdownMenuItem(value: 'residential', child: Text('Residential')),
-                    DropdownMenuItem(value: 'commercial', child: Text('Commercial / Industrial')),
-                  ],
-                  onChanged: (v) => setState(() => category = v ?? category),
-                ),
-              ),
+              Expanded(child: _ro('Category', widget.state.t(widget.state.prefs.category), top: 0)),
               const SizedBox(width: 10),
               Expanded(
                 child: DropdownButtonFormField<bool>(
@@ -319,9 +333,9 @@ class _EstimatorPageState extends State<EstimatorPage> {
             child: ExpansionTile(
               tilePadding: EdgeInsets.zero,
               childrenPadding: EdgeInsets.zero,
-              title: const Text('Advanced assumptions', style: TextStyle(color: C.amber, fontWeight: FontWeight.w800)),
+              title: Text('Advanced assumptions', style: TextStyle(color: C.amber, fontWeight: FontWeight.w800)),
               children: [
-                Row(children: [Expanded(child: _tf('yieldPerKwDay', top: 4)), const SizedBox(width: 10), Expanded(child: _tf('panelWp', top: 4))]),
+                Row(children: [Expanded(child: _ro('Yield (kWh/kW/day), from location', widget.state.locationYield.toStringAsFixed(2), top: 4)), const SizedBox(width: 10), Expanded(child: _tf('panelWp', top: 4))]),
                 Row(children: [Expanded(child: _tf('costPerKw')), const SizedBox(width: 10), Expanded(child: _tf('areaPerKw'))]),
                 Row(children: [Expanded(child: _tf('degradation')), const SizedBox(width: 10), Expanded(child: _tf('escalation'))]),
                 Align(
@@ -335,15 +349,44 @@ class _EstimatorPageState extends State<EstimatorPage> {
         const SizedBox(height: 16),
         FilledButton(
           onPressed: _calc,
-          style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 18), backgroundColor: C.amber, foregroundColor: const Color(0xFF1C1300)),
+          style: FilledButton.styleFrom(padding: EdgeInsets.symmetric(vertical: 18), backgroundColor: C.amber, foregroundColor: Color(0xFF1C1300)),
           child: const Text('Calculate estimate', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
         ),
       ];
 
+  /// Night battery backup sized from the appliance profile (hours without sun).
+  List<Widget> _battery() {
+    final s = widget.state;
+    final load = s.loadHourly();
+    var night = 0.0;
+    for (var h = 0; h < 24; h++) {
+      if (h < 6 || h >= 18) night += load[h];
+    }
+    final usable = night / 0.9; // 90% depth of discharge
+    final peak = load.fold<double>(0, (a, b) => a > b ? a : b);
+    return [
+      Panel(
+        border: C.blue,
+        child: Row(children: [
+          Icon(Icons.battery_charging_full, color: C.blue, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(s.t('battery_sim'), style: const TextStyle(fontWeight: FontWeight.w800)),
+              Text('Night load ${night.toStringAsFixed(1)} kWh → battery about ${usable.toStringAsFixed(1)} kWh, inverter peak ${peak.toStringAsFixed(1)} kW',
+                  style: TextStyle(color: C.mute, fontSize: 12.5)),
+            ]),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 12),
+    ];
+  }
+
   List<Widget> _results() {
     final r = widget.state.result;
     if (r == null) {
-      return [const Panel(child: Center(child: Text('Enter consumption on the Estimate tab to see your solar plan.', style: TextStyle(color: C.mute), textAlign: TextAlign.center)))];
+      return [Panel(child: Center(child: Text('Enter consumption on the Estimate tab to see your solar plan.', style: TextStyle(color: C.mute), textAlign: TextAlign.center)))];
     }
     return [
       Container(
@@ -359,6 +402,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       const SizedBox(height: 12),
+      if (widget.state.prefs.battery) ..._battery(),
       StatGrid([
         StatTile('Roof area needed', '${r.roofSqft.round()} sq ft (${r.roofSqm.round()} sq m)'),
         StatTile('Generation / year', '${groupIndian(r.gen1)} kWh'),
@@ -377,14 +421,14 @@ class _EstimatorPageState extends State<EstimatorPage> {
           const SizedBox(height: 8),
           NetChart(r.series.map((e) => e.net).toList()),
           const SizedBox(height: 6),
-          const Text('Bars below zero are money still to be recovered. Includes panel degradation and yearly tariff rise.', style: TextStyle(color: C.mute, fontSize: 12.5)),
+          Text('Bars below zero are money still to be recovered. Includes panel degradation and yearly tariff rise.', style: TextStyle(color: C.mute, fontSize: 12.5)),
         ]),
       ),
       const SizedBox(height: 14),
       Row(children: [
-        Expanded(child: FilledButton(onPressed: _save, style: FilledButton.styleFrom(backgroundColor: C.amber, foregroundColor: const Color(0xFF1C1300), padding: const EdgeInsets.symmetric(vertical: 16)), child: const Text('Save estimate', style: TextStyle(fontWeight: FontWeight.w800)))),
+        Expanded(child: FilledButton(onPressed: _save, style: FilledButton.styleFrom(backgroundColor: C.amber, foregroundColor: Color(0xFF1C1300), padding: EdgeInsets.symmetric(vertical: 16)), child: Text('Save estimate', style: TextStyle(fontWeight: FontWeight.w800)))),
         const SizedBox(width: 12),
-        Expanded(child: FilledButton(onPressed: () => _quote(_readCustomer(), r), style: FilledButton.styleFrom(backgroundColor: C.amber, foregroundColor: const Color(0xFF1C1300), padding: const EdgeInsets.symmetric(vertical: 16)), child: const Text('Quote PDF', style: TextStyle(fontWeight: FontWeight.w800)))),
+        Expanded(child: FilledButton(onPressed: () => _quote(_readCustomer(), r), style: FilledButton.styleFrom(backgroundColor: C.amber, foregroundColor: Color(0xFF1C1300), padding: EdgeInsets.symmetric(vertical: 16)), child: Text('Quote PDF', style: TextStyle(fontWeight: FontWeight.w800)))),
       ]),
     ];
   }
@@ -408,7 +452,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
       ),
       const SizedBox(height: 12),
       if (rows.isEmpty)
-        Panel(child: Center(child: Text(s.records.isEmpty ? 'No saved estimates yet.' : 'No match.', style: const TextStyle(color: C.mute)))),
+        Panel(child: Center(child: Text(s.records.isEmpty ? 'No saved estimates yet.' : 'No match.', style: TextStyle(color: C.mute)))),
       for (final rec in rows) _savedTile(rec),
       if (s.records.isNotEmpty)
         Align(
@@ -433,7 +477,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(c.name.isEmpty ? 'Unnamed customer' : c.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
           const SizedBox(height: 2),
-          Text('USC ${c.usc.isEmpty ? '-' : c.usc} · ${c.phone.isEmpty ? 'no phone' : c.phone}${c.address.isEmpty ? '' : '\n${c.address}'}', style: const TextStyle(color: C.mute, fontSize: 12.5)),
+          Text('USC ${c.usc.isEmpty ? '-' : c.usc} · ${c.phone.isEmpty ? 'no phone' : c.phone}${c.address.isEmpty ? '' : '\n${c.address}'}', style: TextStyle(color: C.mute, fontSize: 12.5)),
           const SizedBox(height: 8),
           Text('${fmt1(r.kw)} kW · ${r.panels} panels · Net ${inr(r.netCost)} · Payback ${r.paybackYears == null ? '-' : '${fmt1(r.paybackYears!)} yrs'}', style: const TextStyle(fontSize: 13.5)),
           const SizedBox(height: 10),

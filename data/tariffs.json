@@ -1,0 +1,463 @@
+{
+ "version": "2026-11-20",
+ "note": "Energy charges only (Rs per unit), from the state electricity regulator tariff orders. Fixed charges, duty and fuel surcharges are not included. To update tariffs without a new app build, publish a newer 'version' of this file.",
+ "states": [
+  {
+   "id": "andhra_pradesh",
+   "names": {
+    "en": "Andhra Pradesh",
+    "te": "ఆంధ్రప్రదేశ్",
+    "hi": "आंध्र प्रदेश",
+    "or": "ଆନ୍ଧ୍ର ପ୍ରଦେଶ",
+    "pa": "ਆਂਧਰਾ ਪ੍ਰਦੇਸ਼"
+   },
+   "match": [
+    "andhra"
+   ],
+   "pr": 79.2,
+   "exportRate": null,
+   "order": "APERC Retail Supply Tariff Order FY 2026-27 (FY 2025-26 tariffs retained)",
+   "effective": "2026-04-01",
+   "discoms": [
+    {
+     "id": "apspdcl",
+     "name": "APSPDCL",
+     "coverage": "Tirupati, Chittoor, Nellore, Kadapa, Anantapur, Kurnool",
+     "url": "https://www.apspdcl.in"
+    },
+    {
+     "id": "apepdcl",
+     "name": "APEPDCL",
+     "coverage": "Visakhapatnam, Srikakulam, Vizianagaram, East & West Godavari",
+     "url": "https://www.apeasternpower.com"
+    },
+    {
+     "id": "apcpdcl",
+     "name": "APCPDCL",
+     "coverage": "Vijayawada, Guntur, Krishna, Prakasam",
+     "url": "https://www.apcpdcl.in"
+    }
+   ],
+   "tariff": {
+    "domestic": {
+     "label": "LT-I Domestic",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": 30,
+         "rate": 1.9
+        },
+        {
+         "upTo": 75,
+         "rate": 3.0
+        },
+        {
+         "upTo": 125,
+         "rate": 4.5
+        },
+        {
+         "upTo": 225,
+         "rate": 6.0
+        },
+        {
+         "upTo": 400,
+         "rate": 8.75
+        },
+        {
+         "upTo": null,
+         "rate": 9.75
+        }
+       ]
+      }
+     ]
+    },
+    "commercial": {
+     "label": "LT-II Commercial",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": 50,
+         "rate": 5.4
+        },
+        {
+         "upTo": 100,
+         "rate": 7.65
+        },
+        {
+         "upTo": 300,
+         "rate": 9.05
+        },
+        {
+         "upTo": 500,
+         "rate": 9.6
+        },
+        {
+         "upTo": null,
+         "rate": 10.15
+        }
+       ]
+      }
+     ]
+    },
+    "industrial": {
+     "label": "LT-III Industry",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": null,
+         "rate": 6.7
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "telangana",
+   "names": {
+    "en": "Telangana",
+    "te": "తెలంగాణ",
+    "hi": "तेलंगाना",
+    "or": "ତେଲଙ୍ଗାନା",
+    "pa": "ਤੇਲੰਗਾਨਾ"
+   },
+   "match": [
+    "telangana"
+   ],
+   "pr": 79.2,
+   "exportRate": 3.8,
+   "order": "TGERC Retail Supply Tariff Order FY 2026-27",
+   "effective": "2026-04-01",
+   "discoms": [
+    {
+     "id": "tgspdcl",
+     "name": "TGSPDCL (TSSPDCL)",
+     "coverage": "Hyderabad, Rangareddy, Medchal, Mahabubnagar, Nalgonda",
+     "url": "https://www.tgsouthernpower.org"
+    },
+    {
+     "id": "tgnpdcl",
+     "name": "TGNPDCL (TSNPDCL)",
+     "coverage": "Warangal, Karimnagar, Khammam, Adilabad, Nizamabad",
+     "url": "https://tgnpdcl.com"
+    }
+   ],
+   "tariff": {
+    "domestic": {
+     "label": "LT-I Domestic",
+     "schedules": [
+      {
+       "max": 100,
+       "slabs": [
+        {
+         "upTo": 50,
+         "rate": 1.95
+        },
+        {
+         "upTo": null,
+         "rate": 3.1
+        }
+       ]
+      },
+      {
+       "max": 200,
+       "slabs": [
+        {
+         "upTo": 100,
+         "rate": 3.4
+        },
+        {
+         "upTo": null,
+         "rate": 4.8
+        }
+       ]
+      },
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": 200,
+         "rate": 5.1
+        },
+        {
+         "upTo": 300,
+         "rate": 7.7
+        },
+        {
+         "upTo": 400,
+         "rate": 9.0
+        },
+        {
+         "upTo": 800,
+         "rate": 9.5
+        },
+        {
+         "upTo": null,
+         "rate": 10.0
+        }
+       ]
+      }
+     ]
+    },
+    "commercial": {
+     "label": "LT-II Non-Domestic",
+     "schedules": [
+      {
+       "max": 50,
+       "slabs": [
+        {
+         "upTo": null,
+         "rate": 7.0
+        }
+       ]
+      },
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": 100,
+         "rate": 8.5
+        },
+        {
+         "upTo": 300,
+         "rate": 9.9
+        },
+        {
+         "upTo": 500,
+         "rate": 10.4
+        },
+        {
+         "upTo": null,
+         "rate": 11.0
+        }
+       ]
+      }
+     ]
+    },
+    "industrial": {
+     "label": "LT-III Industry",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": null,
+         "rate": 7.7
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "odisha",
+   "names": {
+    "en": "Odisha",
+    "te": "ఒడిశా",
+    "hi": "ओडिशा",
+    "or": "ଓଡ଼ିଶା",
+    "pa": "ਓਡੀਸ਼ਾ"
+   },
+   "match": [
+    "odisha",
+    "orissa"
+   ],
+   "pr": 79.2,
+   "exportRate": null,
+   "order": "OERC Retail Tariff Order FY 2026-27",
+   "effective": "2026-04-01",
+   "discoms": [
+    {
+     "id": "tpcodl",
+     "name": "TPCODL",
+     "coverage": "Bhubaneswar, Cuttack, Puri, Khordha, Jagatsinghpur",
+     "url": "https://www.tpcentralodisha.com"
+    },
+    {
+     "id": "tpnodl",
+     "name": "TPNODL",
+     "coverage": "Balasore, Bhadrak, Keonjhar, Mayurbhanj, Jajpur",
+     "url": "https://www.tpnodl.com"
+    },
+    {
+     "id": "tpsodl",
+     "name": "TPSODL",
+     "coverage": "Berhampur, Gajapati, Koraput, Rayagada, Kalahandi",
+     "url": "https://www.tpsouthernodisha.com"
+    },
+    {
+     "id": "tpwodl",
+     "name": "TPWODL",
+     "coverage": "Sambalpur, Sundargarh, Rourkela, Bargarh, Jharsuguda",
+     "url": "https://www.tpwesternodisha.com"
+    }
+   ],
+   "tariff": {
+    "domestic": {
+     "label": "LT Domestic",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": 50,
+         "rate": 2.9
+        },
+        {
+         "upTo": 200,
+         "rate": 4.7
+        },
+        {
+         "upTo": 400,
+         "rate": 5.7
+        },
+        {
+         "upTo": null,
+         "rate": 6.1
+        }
+       ]
+      }
+     ]
+    },
+    "commercial": {
+     "label": "LT General Purpose",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": 100,
+         "rate": 5.9
+        },
+        {
+         "upTo": 300,
+         "rate": 7.0
+        },
+        {
+         "upTo": null,
+         "rate": 7.6
+        }
+       ]
+      }
+     ]
+    },
+    "industrial": {
+     "label": "LT Industrial",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": null,
+         "rate": 6.2
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "chhattisgarh",
+   "names": {
+    "en": "Chhattisgarh",
+    "te": "ఛత్తీస్‌గఢ్",
+    "hi": "छत्तीसगढ़",
+    "or": "ଛତିଶଗଡ଼",
+    "pa": "ਛੱਤੀਸਗੜ੍ਹ"
+   },
+   "match": [
+    "chhattisgarh",
+    "chattisgarh"
+   ],
+   "pr": 79.2,
+   "exportRate": null,
+   "order": "CSERC Tariff Order FY 2026-27",
+   "effective": "2026-07-01",
+   "discoms": [
+    {
+     "id": "cspdcl",
+     "name": "CSPDCL",
+     "coverage": "Raipur, Bilaspur, Durg, Bhilai, Korba, Raigarh and all districts",
+     "url": "https://cspdcl.co.in"
+    }
+   ],
+   "tariff": {
+    "domestic": {
+     "label": "LV-1 Domestic",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": 100,
+         "rate": 4.4
+        },
+        {
+         "upTo": 200,
+         "rate": 4.5
+        },
+        {
+         "upTo": 400,
+         "rate": 6.0
+        },
+        {
+         "upTo": 600,
+         "rate": 7.0
+        },
+        {
+         "upTo": null,
+         "rate": 8.8
+        }
+       ]
+      }
+     ]
+    },
+    "commercial": {
+     "label": "LV-2 Non-Domestic",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": 100,
+         "rate": 6.5
+        },
+        {
+         "upTo": 400,
+         "rate": 7.6
+        },
+        {
+         "upTo": null,
+         "rate": 9.1
+        }
+       ]
+      }
+     ]
+    },
+    "industrial": {
+     "label": "HV-3 Industry (11 kV)",
+     "schedules": [
+      {
+       "max": null,
+       "slabs": [
+        {
+         "upTo": null,
+         "rate": 7.85
+        }
+       ]
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

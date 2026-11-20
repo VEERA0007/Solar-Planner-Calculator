@@ -18,3 +18,4 @@ analysis_options.yaml
 dist/
 *.log
 .DS_Store
+screenshots/

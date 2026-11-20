@@ -1,62 +1,130 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
+/// Colour tokens. Call [C.apply] when the day/night mode changes; the root
+/// widget rebuilds so every screen picks the new values up.
 class C {
-  static const bg = Color(0xFF050A18);
-  static const card = Color(0xFF0A1224);
-  static const card2 = Color(0xFF0E182E);
-  static const line = Color(0xFF1B2742);
-  static const text = Color(0xFFF1F5F9);
-  static const mute = Color(0xFF94A3B8);
-  static const blue = Color(0xFF0A84FF);
-  static const sky = Color(0xFF22B8FF);
-  static const amber = Color(0xFFFBA10F);
-  static const sun = Color(0xFFFBBF24);
-  static const green = Color(0xFF22D39A);
-  static const red = Color(0xFFF87171);
-  static const purple = Color(0xFFA78BFA);
+  static bool dark = true;
+  static Color bg = const Color(0xFF050A18);
+  static Color card = const Color(0xFF0A1224);
+  static Color card2 = const Color(0xFF0E182E);
+  static Color chip = const Color(0xFF131C31);
+  static Color line = const Color(0xFF1B2742);
+  static Color text = const Color(0xFFF1F5F9);
+  static Color mute = const Color(0xFF94A3B8);
+  static Color blue = const Color(0xFF0A84FF);
+  static Color sky = const Color(0xFF22B8FF);
+  static Color amber = const Color(0xFFFBA10F);
+  static Color sun = const Color(0xFFFBBF24);
+  static Color green = const Color(0xFF22D39A);
+  static Color red = const Color(0xFFF87171);
+  static Color purple = const Color(0xFFA78BFA);
+  static Color orange = const Color(0xFFFB8A2E);
+  static Color nav = const Color(0xFF080F1F);
+  // pastel icon chips (background, foreground)
+  static Color chipSun = const Color(0xFF2A1F12);
+  static Color chipBlue = const Color(0xFF0D2238);
+  static Color chipPurple = const Color(0xFF221941);
+  static Color chipGreen = const Color(0xFF0C2A24);
+
+  static void apply(bool isDark) {
+    dark = isDark;
+    if (isDark) {
+      bg = const Color(0xFF050A18);
+      card = const Color(0xFF0A1224);
+      card2 = const Color(0xFF0E182E);
+      chip = const Color(0xFF131C31);
+      line = const Color(0xFF1B2742);
+      text = const Color(0xFFF1F5F9);
+      mute = const Color(0xFF94A3B8);
+      blue = const Color(0xFF0A84FF);
+      sky = const Color(0xFF22B8FF);
+      amber = const Color(0xFFFBA10F);
+      green = const Color(0xFF22D39A);
+      red = const Color(0xFFF87171);
+      purple = const Color(0xFFA78BFA);
+      nav = const Color(0xFF080F1F);
+      chipSun = const Color(0xFF2A1F12);
+      chipBlue = const Color(0xFF0D2238);
+      chipPurple = const Color(0xFF221941);
+      chipGreen = const Color(0xFF0C2A24);
+    } else {
+      bg = const Color(0xFFF6F8FC);
+      card = const Color(0xFFFFFFFF);
+      card2 = const Color(0xFFF1F5FB);
+      chip = const Color(0xFFEFF3FA);
+      line = const Color(0xFFE3E9F3);
+      text = const Color(0xFF0F172A);
+      mute = const Color(0xFF64748B);
+      blue = const Color(0xFF0A74E8);
+      sky = const Color(0xFF0B8FD6);
+      amber = const Color(0xFFE08A00);
+      green = const Color(0xFF0E9F6E);
+      red = const Color(0xFFDC2626);
+      purple = const Color(0xFF7C3AED);
+      nav = const Color(0xFFFFFFFF);
+      chipSun = const Color(0xFFFFF1D6);
+      chipBlue = const Color(0xFFDDEEFF);
+      chipPurple = const Color(0xFFEBE4FF);
+      chipGreen = const Color(0xFFD9F5EA);
+    }
+  }
 }
 
 const List<String> kMono = ['Consolas', 'Menlo', 'Roboto Mono', 'monospace'];
 
-ThemeData buildTheme() {
-  final scheme = ColorScheme.fromSeed(seedColor: C.blue, brightness: Brightness.dark).copyWith(
+/// Text scale chosen from the device's screen size, so no manual control is
+/// needed. The system accessibility scale is only allowed a small nudge.
+double autoTextScale(MediaQueryData mq) {
+  final w = mq.size.shortestSide;
+  final base = w < 340 ? 0.88 : w < 380 ? 0.94 : w < 440 ? 1.0 : w < 600 ? 1.05 : w < 840 ? 1.12 : 1.2;
+  final sys = mq.textScaler.scale(10) / 10;
+  return base * sys.clamp(0.92, 1.1);
+}
+
+ThemeData buildTheme(bool dark) {
+  C.apply(dark);
+  final b = dark ? Brightness.dark : Brightness.light;
+  final scheme = ColorScheme.fromSeed(seedColor: C.blue, brightness: b).copyWith(
     surface: C.bg,
     primary: C.blue,
   );
+  OutlineInputBorder ob(Color c, [double w = 1]) =>
+      OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: c, width: w));
   return ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
+    brightness: b,
     colorScheme: scheme,
     scaffoldBackgroundColor: C.bg,
     canvasColor: C.bg,
-    dialogTheme: const DialogThemeData(backgroundColor: C.card),
+    dialogTheme: DialogThemeData(backgroundColor: C.card, surfaceTintColor: Colors.transparent),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: C.bg,
+      fillColor: C.card2,
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: C.line)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: C.line)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: C.amber, width: 2)),
-      labelStyle: const TextStyle(color: C.mute),
+      border: ob(C.line),
+      enabledBorder: ob(C.line),
+      focusedBorder: ob(C.amber, 2),
+      labelStyle: TextStyle(color: C.mute),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: const Color(0xFF080F1F),
-      indicatorColor: const Color(0xFF0E2238),
+      backgroundColor: C.nav,
+      surfaceTintColor: Colors.transparent,
+      indicatorColor: C.chipBlue,
       labelTextStyle: WidgetStateProperty.resolveWith((s) => TextStyle(
             fontSize: 11,
             fontWeight: s.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
-            color: s.contains(WidgetState.selected) ? const Color(0xFF2EA8FF) : const Color(0xFF8391AD),
+            color: s.contains(WidgetState.selected) ? C.blue : C.mute,
           )),
-      iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(
-            color: s.contains(WidgetState.selected) ? const Color(0xFF2EA8FF) : const Color(0xFF8391AD))),
+      iconTheme: WidgetStateProperty.resolveWith(
+          (s) => IconThemeData(color: s.contains(WidgetState.selected) ? C.blue : C.mute)),
     ),
     snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
   );
 }
 
-/// Rounded dark card used across all screens.
+/// Rounded card used across all screens.
 class Panel extends StatelessWidget {
   final Widget child;
   final EdgeInsets padding;
@@ -93,7 +161,7 @@ class PageHead extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
-          Text(subtitle, style: const TextStyle(color: C.mute, fontSize: 13.5)),
+          Text(subtitle, style: TextStyle(color: C.mute, fontSize: 13.5)),
         ]),
       );
 }
@@ -108,7 +176,7 @@ class StatTile extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         border: hi ? C.amber : null,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(color: C.mute, fontSize: 12)),
+          Text(label, style: TextStyle(color: C.mute, fontSize: 12)),
           const SizedBox(height: 3),
           Text(value, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
         ]),

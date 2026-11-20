@@ -17,13 +17,15 @@ s = open(p, encoding='utf-8').read()
 s = re.sub(r'android:label="[^"]*"', 'android:label="Solar Planner"', s, count=1)
 extra = '''
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="https"/>
         </intent>
     </queries>'''
-if 'android.permission.INTERNET' not in s:
+if 'android.permission.ACCESS_COARSE_LOCATION' not in s:
     s = re.sub(r'(<manifest[^>]*>)', lambda m: m.group(1) + extra, s, count=1)
 open(p, 'w', encoding='utf-8').write(s)
 
@@ -66,4 +68,14 @@ fi
 
 if [[ "$PLATFORMS" == *web* ]]; then
   sed -i.bak 's#<title>calculator</title>#<title>Solar Planner \& Calculator</title>#' web/index.html || true
+fi
+
+if [[ "$PLATFORMS" == *ios* ]]; then
+python3 - <<'PY'
+p = 'ios/Runner/Info.plist'
+s = open(p, encoding='utf-8').read()
+if 'NSLocationWhenInUseUsageDescription' not in s:
+    s = s.replace('</dict>\n</plist>', '\t<key>NSLocationWhenInUseUsageDescription</key>\n\t<string>Your location is used to show local sunlight, tariffs and the right grid.</string>\n</dict>\n</plist>')
+    open(p, 'w', encoding='utf-8').write(s)
+PY
 fi

@@ -3,9 +3,13 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'calc.dart';
 import 'sun.dart';
+import 'i18n.dart';
+import 'geo.dart';
+import 'solar_data.dart';
+import 'tariff.dart';
+import 'store_consts.dart';
+export 'store_consts.dart';
 
-const double kPerformanceRatio = 0.84;
-const double kCo2PerKwh = 0.82;
 const List<double> kMonthPsh = [5.4, 6.1, 6.6, 6.7, 6.4, 5.0, 4.3, 4.2, 4.6, 5.1, 4.9, 5.0];
 
 class Site {
@@ -34,6 +38,98 @@ class Site {
       kwp: n('kwp', d.kwp),
       tariff: n('tariff', d.tariff),
       auto: (j['auto'] as bool?) ?? true,
+    );
+  }
+}
+
+
+/// Owner and plant details (Profile dialog). System capacity lives in [Site.kwp].
+class Profile {
+  String name, serviceNo, mobile, pin, email, address;
+  String roofType, panel, inverter, commission;
+  double roofSqft;
+  int warranty;
+  Profile({
+    this.name = '',
+    this.serviceNo = '',
+    this.mobile = '',
+    this.pin = '',
+    this.email = '',
+    this.address = '',
+    this.roofType = 'rcc',
+    this.panel = '',
+    this.inverter = '',
+    this.commission = '',
+    this.roofSqft = 700,
+    this.warranty = 25,
+  });
+  Map<String, dynamic> toJson() => {
+        'name': name, 'serviceNo': serviceNo, 'mobile': mobile, 'pin': pin, 'email': email,
+        'address': address, 'roofType': roofType, 'panel': panel, 'inverter': inverter,
+        'commission': commission, 'roofSqft': roofSqft, 'warranty': warranty,
+      };
+  factory Profile.fromJson(Map<String, dynamic> j) {
+    final d = Profile();
+    String t(String k, String def) => (j[k] as String?) ?? def;
+    return Profile(
+      name: t('name', ''), serviceNo: t('serviceNo', ''), mobile: t('mobile', ''), pin: t('pin', ''),
+      email: t('email', ''), address: t('address', ''), roofType: t('roofType', d.roofType),
+      panel: t('panel', ''), inverter: t('inverter', ''), commission: t('commission', ''),
+      roofSqft: (j['roofSqft'] as num?)?.toDouble() ?? d.roofSqft,
+      warranty: (j['warranty'] as num?)?.toInt() ?? d.warranty,
+    );
+  }
+
+  /// Commission date parsed from dd/mm/yyyy, or null.
+  DateTime? get commissionDate {
+    final m = RegExp(r'^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$').firstMatch(commission.trim());
+    if (m == null) return null;
+    try {
+      return DateTime(int.parse(m[3]!), int.parse(m[2]!), int.parse(m[1]!));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  DateTime? get warrantyEnds {
+    final c = commissionDate;
+    return c == null ? null : DateTime(c.year + warranty, c.month, c.day);
+  }
+}
+
+/// User preferences (Settings dialog).
+class Prefs {
+  String lang, stateId, discomId, category;
+  bool? dark; // null = follow the device
+  bool battery, autoSync, cloudAlerts;
+  int dustDays;
+  Prefs({
+    this.lang = 'en',
+    this.stateId = 'telangana',
+    this.discomId = '',
+    this.category = 'domestic',
+    this.dark,
+    this.battery = false,
+    this.autoSync = true,
+    this.cloudAlerts = true,
+    this.dustDays = 30,
+  });
+  Map<String, dynamic> toJson() => {
+        'lang': lang, 'stateId': stateId, 'discomId': discomId, 'category': category, 'dark': dark,
+        'battery': battery, 'autoSync': autoSync, 'cloudAlerts': cloudAlerts, 'dustDays': dustDays,
+      };
+  factory Prefs.fromJson(Map<String, dynamic> j) {
+    final d = Prefs();
+    return Prefs(
+      lang: (j['lang'] as String?) ?? d.lang,
+      stateId: (j['stateId'] as String?) ?? d.stateId,
+      discomId: (j['discomId'] as String?) ?? '',
+      category: (j['category'] as String?) ?? d.category,
+      dark: j['dark'] as bool?,
+      battery: (j['battery'] as bool?) ?? false,
+      autoSync: (j['autoSync'] as bool?) ?? true,
+      cloudAlerts: (j['cloudAlerts'] as bool?) ?? true,
+      dustDays: (j['dustDays'] as num?)?.toInt() ?? 30,
     );
   }
 }
@@ -109,6 +205,12 @@ class AppState extends ChangeNotifier {
   Brand brand = Brand();
   List<Appliance> appliances = [];
   List<SavedRecord> records = [];
+  Profile profile = Profile();
+  Prefs prefs = Prefs();
+  TariffBook? book;
+  Place? place;
+  MonthlyPsh? monthly;
+  DateTime? lastCleaned;
   Irradiance? irr;
   DateTime? lastSync;
   bool syncing = false;
@@ -149,13 +251,32 @@ class AppState extends ChangeNotifier {
       if (r != null) {
         records = r.whereType<Map>().map((e) => SavedRecord.fromJson(e.cast<String, dynamic>())).toList();
       }
+      final pr = obj('profile');
+      if (pr != null) profile = Profile.fromJson(pr);
+      final pf = obj('prefs');
+      if (pf != null) prefs = Prefs.fromJson(pf);
+      final lc = p.getInt('lastCleaned');
+      if (lc != null) lastCleaned = DateTime.fromMillisecondsSinceEpoch(lc);
       final ls = p.getInt('lastSync');
       if (ls != null) lastSync = DateTime.fromMillisecondsSinceEpoch(ls);
     } catch (_) {
       if (appliances.isEmpty) appliances = _defaultAppliances();
     }
     if (appliances.isEmpty && (_p?.getString('appliances') == null)) appliances = _defaultAppliances();
+    site.auto = prefs.autoSync;
+    await _loadTariffs();
+    _syncDerived();
     notifyListeners();
+  }
+
+  Future<void> _loadTariffs() async {
+    book = await TariffBook.load(
+      cached: _p?.getString('tariffs'),
+      onFresh: (raw) => _p?.setString('tariffs', raw),
+    );
+    if (prefs.discomId.isEmpty || !st.discoms.any((d) => d.id == prefs.discomId)) {
+      prefs.discomId = st.discoms.first.id;
+    }
   }
 
   List<Appliance> _defaultAppliances() {
@@ -183,7 +304,6 @@ class AppState extends ChangeNotifier {
   /// Estimator result feeds the Home dashboard (plant size and tariff).
   void publishEstimate(double kw, double tariff) {
     site.kwp = (kw * 100).round() / 100;
-    site.tariff = tariff;
     saveSite();
   }
 
@@ -192,6 +312,7 @@ class AppState extends ChangeNotifier {
     syncing = true;
     notifyListeners();
     irr = await fetchIrradiance(site.lat, site.lon);
+    monthly ??= await loadMonthlyPsh(site.lat, site.lon);
     lastSync = DateTime.now();
     _p?.setInt('lastSync', lastSync!.millisecondsSinceEpoch);
     syncing = false;
@@ -229,8 +350,115 @@ class AppState extends ChangeNotifier {
     return (kw: kw, n: n);
   }
 
+  // ----- tariffs & derived links between Settings, Profile and Home -----
+  String get lang => prefs.lang;
+  String t(String key) => tr(prefs.lang, key);
+
+  StateTariff get st => book!.byId(prefs.stateId);
+  Discom get discom => st.discoms.firstWhere((d) => d.id == prefs.discomId, orElse: () => st.discoms.first);
+  CategoryTariff get tariffCat => st.cat(prefs.category);
+
+  /// Monthly consumption used to pick the slab (appliance load x 30 days).
+  double get monthlyUnits => dailyLoad * 30;
+
+  /// Price of the next unit at the current consumption: not editable.
+  double get unitPrice => book == null ? site.tariff : tariffCat.marginal(monthlyUnits);
+  String get slabText => book == null ? '' : '${tariffCat.label} (${tariffCat.slabLabel(monthlyUnits)})';
+  /// Daily kWh per kWp from the location's long-term sun hours.
+  double get locationYield => (monthly?.annual ?? (fallbackPsh(site.lat).reduce((a, b) => a + b) / 12)) * pr;
+  double get pr => (book == null ? 79.2 : st.pr) / 100;
+  double? get exportRate => book == null ? null : st.exportRate;
+  int get year0 => DateTime.now().year;
+
+  void _syncDerived() {
+    if (book != null) site.tariff = double.parse(unitPrice.toStringAsFixed(2));
+  }
+
+  void savePrefs() {
+    _save('prefs', prefs.toJson());
+    site.auto = prefs.autoSync;
+    _syncDerived();
+    saveSite();
+  }
+
+  void saveProfile() {
+    _save('profile', profile.toJson());
+    _syncDerived();
+    saveSite();
+  }
+
+  /// Picks the state and its first DISCOM.
+  void chooseState(String id) {
+    prefs.stateId = id;
+    prefs.discomId = st.discoms.first.id;
+  }
+
+  /// Day/night: the toggle wins; otherwise auto from the real sun position.
+  bool isDark(DateTime now) {
+    if (prefs.dark != null) return prefs.dark!;
+    return solarPosition(now, site.lat, site.lon).alt <= 0; // auto: night when the sun is down
+  }
+
+  void setDark(bool v) {
+    prefs.dark = v;
+    savePrefs();
+  }
+
+  /// Moves the app to a new place: refetches sun data, picks the state when
+  /// it is one of the supported ones, and updates the Home header.
+  Future<void> setPlace(Place pl, {bool user = false}) async {
+    place = pl;
+    site.lat = pl.lat;
+    site.lon = pl.lng;
+    if (pl.city.isNotEmpty) site.city = pl.city;
+    site.label = pl.subtitle;
+    final detected = book?.detect(pl.region);
+    if (detected != null && detected.id != prefs.stateId) {
+      chooseState(detected.id);
+      _save('prefs', prefs.toJson());
+    }
+    _syncDerived();
+    saveSite();
+    monthly = await loadMonthlyPsh(pl.lat, pl.lng);
+    await sync();
+  }
+
+  Future<void> locate() async {
+    final pl = await currentPlace();
+    if (pl != null) await setPlace(pl);
+  }
+
+  void markCleaned() {
+    lastCleaned = DateTime.now();
+    _p?.setInt('lastCleaned', lastCleaned!.millisecondsSinceEpoch);
+    notifyListeners();
+  }
+
+  int? get cleanDueInDays {
+    final base = lastCleaned ?? profile.commissionDate;
+    if (base == null) return null;
+    return prefs.dustDays - DateTime.now().difference(base).inDays;
+  }
+
+  Future<void> resetAll() async {
+    await _p?.clear();
+    site = Site();
+    brand = Brand();
+    profile = Profile();
+    prefs = Prefs();
+    records = [];
+    appliances = _defaultAppliances();
+    lastCleaned = null;
+    input = EstimateInput();
+    customer = Customer();
+    result = null;
+    await _loadTariffs();
+    _syncDerived();
+    notifyListeners();
+  }
+
   List<double> solarHourlyKw() {
     final g = irr?.hourly ?? List<double>.filled(24, 0);
-    return g.map((v) => site.kwp * v / 1000 * kPerformanceRatio).toList();
+    return g.map((v) => site.kwp * v / 1000 * pr).toList();
   }
 }

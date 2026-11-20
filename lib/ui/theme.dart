@@ -134,20 +134,16 @@ class Panel extends StatelessWidget {
   const Panel({super.key, required this.child, this.padding = const EdgeInsets.all(16), this.radius = 22, this.border, this.onTap});
   @override
   Widget build(BuildContext context) {
-    final box = Container(
-      width: double.infinity,
-      padding: padding,
-      decoration: BoxDecoration(
-        color: C.card,
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: border ?? C.line),
-      ),
-      child: child,
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(radius),
+      side: BorderSide(color: border ?? C.line),
     );
-    if (onTap == null) return box;
+    final body = Padding(padding: padding, child: SizedBox(width: double.infinity, child: child));
     return Material(
-      color: Colors.transparent,
-      child: InkWell(borderRadius: BorderRadius.circular(radius), onTap: onTap, child: box),
+      color: C.card,
+      shape: shape,
+      clipBehavior: Clip.antiAlias,
+      child: onTap == null ? body : InkWell(onTap: onTap, child: body),
     );
   }
 }

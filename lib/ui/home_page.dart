@@ -186,7 +186,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(width: 10),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(t('hourly_sync'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                Text(t('hourly_sync'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
                 Row(children: [
                   Icon(Icons.schedule, size: 13, color: C.mute),
                   const SizedBox(width: 4),
@@ -218,7 +218,7 @@ class _HomePageState extends State<HomePage> {
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2.2))
                   : const Icon(Icons.sync, size: 18),
               label: Text(t('sync_now'), style: const TextStyle(fontWeight: FontWeight.w700)),
-              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12)),
+              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11), visualDensity: VisualDensity.compact),
             ),
           ]),
         ),
@@ -456,7 +456,7 @@ class _Avatar extends StatelessWidget {
             bottom: 0,
             left: 0,
             right: 0,
-            child: Text('★★★', textAlign: TextAlign.center, style: TextStyle(color: C.sun, fontSize: 9, height: 1)),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [for (var i = 0; i < 3; i++) Icon(Icons.star, size: 11, color: C.sun)]),
           ),
         ]),
       ),

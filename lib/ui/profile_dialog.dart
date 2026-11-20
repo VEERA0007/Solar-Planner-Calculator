@@ -210,7 +210,7 @@ class _ProfileDialogState extends State<_ProfileDialog> with SingleTickerProvide
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(name.isEmpty ? t('profile') : name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800), overflow: TextOverflow.ellipsis),
-                  Text('★★★ ${t('pro_tier')}', style: TextStyle(color: C.amber, fontSize: 12, fontWeight: FontWeight.w600)),
+                  Row(children: [for (var i = 0; i < 3; i++) Icon(Icons.star, size: 13, color: C.sun), const SizedBox(width: 6), Flexible(child: Text(t('pro_tier'), overflow: TextOverflow.ellipsis, style: TextStyle(color: C.amber, fontSize: 12, fontWeight: FontWeight.w600)))]),
                 ]),
               ),
               IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),

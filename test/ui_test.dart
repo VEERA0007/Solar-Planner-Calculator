@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:calculator/core/store.dart';
 import 'package:calculator/main.dart' show Shell;
+import 'package:calculator/ui/sun_art.dart';
 import 'package:calculator/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -31,13 +32,15 @@ Future<void> _loadFonts() async {
   }
 }
 
+final shotKey = GlobalKey();
+
 class Harness extends StatelessWidget {
   final AppState s;
   const Harness(this.s, {super.key});
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: s,
-        builder: (context, _) => MaterialApp(
+        builder: (context, _) => RepaintBoundary(key: shotKey, child: MaterialApp(
           debugShowCheckedModeBanner: false,
           theme: buildTheme(s.isDark(DateTime.now())),
           builder: (c, child) {
@@ -45,14 +48,14 @@ class Harness extends StatelessWidget {
             return MediaQuery(data: mq.copyWith(textScaler: TextScaler.linear(autoTextScale(mq))), child: child!);
           },
           home: Shell(state: s),
-        ),
+        )),
       );
 }
 
 Future<void> _shot(WidgetTester t, String name) async {
   final dir = Directory('screenshots')..createSync(recursive: true);
   await t.runAsync(() async {
-    final b = t.renderObject<RenderRepaintBoundary>(find.byType(RepaintBoundary).first);
+    final b = shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final img = await b.toImage(pixelRatio: 1.5);
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
     File('${dir.path}/$name.png').writeAsBytesSync(data!.buffer.asUint8List());
@@ -113,7 +116,7 @@ void main() {
     await t.pumpAndSettle();
 
     // profile
-    await t.tap(find.text('★★★'));
+    await t.tap(find.byIcon(Icons.person));
     await t.pumpAndSettle();
     expect(t.takeException(), isNull);
     await t.enterText(find.byType(TextField).first, 'Test Owner');
@@ -125,6 +128,43 @@ void main() {
     await t.pumpAndSettle();
     expect(s.profile.name, 'Test Owner');
     await t.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('scenic art at several sun positions', (t) async {
+    t.view.physicalSize = const Size(900, 330);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    Widget art(bool night, double p) => Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: AspectRatio(aspectRatio: 320 / 190, child: CustomPaint(painter: SunArtPainter(night: night, t: p, dark: night))),
+          ),
+        );
+    await t.pumpWidget(RepaintBoundary(
+      key: shotKey,
+      child: Directionality(
+        textDirection: TextDirection.ltr,
+        child: ColoredBox(
+          color: const Color(0xFF888888),
+          child: Column(children: [
+            Expanded(child: Row(children: [art(false, .1), art(false, .5), art(false, .9)])),
+            Expanded(child: Row(children: [art(true, .1), art(true, .5), art(true, .9)])),
+          ]),
+        ),
+      ),
+    ));
+    await _shot(t, 'art-positions');
+  });
+
+  test('arc progress follows the sun and the night', () {
+    final rise = DateTime(2026, 11, 20, 6, 0), set = DateTime(2026, 11, 20, 18, 0);
+    expect(arcProgress(DateTime(2026, 11, 20, 12), rise, set, night: false), closeTo(.5, 1e-9));
+    expect(arcProgress(DateTime(2026, 11, 20, 9), rise, set, night: false), closeTo(.25, 1e-9));
+    expect(arcProgress(DateTime(2026, 11, 20, 21), rise, set, night: false), 1.0);
+    expect(arcProgress(DateTime(2026, 11, 20, 3), rise, set, night: false), 0.0);
+    // night path: sunset 18:00 -> sunrise 06:00 next day, midnight is the middle
+    expect(arcProgress(DateTime(2026, 11, 21, 0), rise, set, night: true), closeTo(.5, 1e-9));
+    expect(arcProgress(DateTime(2026, 11, 20, 3), rise, set, night: true), closeTo(.75, 1e-9));
   });
 
   testWidgets('language switch changes navigation labels', (t) async {

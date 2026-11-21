@@ -102,6 +102,7 @@ class Prefs {
   bool? dark; // null = follow the device
   bool battery, autoSync, cloudAlerts;
   int dustDays;
+  double textScale; // user text/screen size on top of the automatic fit (1.0 = auto)
   Prefs({
     this.lang = 'en',
     this.stateId = 'telangana',
@@ -112,10 +113,11 @@ class Prefs {
     this.autoSync = true,
     this.cloudAlerts = true,
     this.dustDays = 30,
+    this.textScale = 1.0,
   });
   Map<String, dynamic> toJson() => {
         'lang': lang, 'stateId': stateId, 'discomId': discomId, 'category': category, 'dark': dark,
-        'battery': battery, 'autoSync': autoSync, 'cloudAlerts': cloudAlerts, 'dustDays': dustDays,
+        'battery': battery, 'autoSync': autoSync, 'cloudAlerts': cloudAlerts, 'dustDays': dustDays, 'textScale': textScale,
       };
   factory Prefs.fromJson(Map<String, dynamic> j) {
     final d = Prefs();
@@ -129,6 +131,7 @@ class Prefs {
       autoSync: (j['autoSync'] as bool?) ?? true,
       cloudAlerts: (j['cloudAlerts'] as bool?) ?? true,
       dustDays: (j['dustDays'] as num?)?.toInt() ?? 30,
+      textScale: ((j['textScale'] as num?)?.toDouble() ?? 1.0).clamp(.8, 1.4),
     );
   }
 }

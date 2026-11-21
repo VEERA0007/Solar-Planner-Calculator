@@ -25,3 +25,5 @@ flutter:
   uses-material-design: true
   assets:
     - data/tariffs.json
+    - assets/scene/day.jpg
+    - assets/scene/night.jpg

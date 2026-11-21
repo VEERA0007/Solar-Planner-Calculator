@@ -69,6 +69,7 @@ void main() {
     PackageInfo.setMockInitialValues(
         appName: 'Solar Planner', packageName: 'com.solarplanner.calculator', version: '0.0.7', buildNumber: '1', buildSignature: '');
     await _loadFonts();
+    await SunScenePainter.preload();
   });
 
   const sizes = <String, Size>{'phone-small': Size(360, 700), 'phone': Size(412, 915), 'tablet': Size(820, 1180), 'desktop': Size(1280, 800)};

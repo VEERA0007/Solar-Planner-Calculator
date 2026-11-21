@@ -57,7 +57,8 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
       ..battery = d.battery
       ..autoSync = d.autoSync
       ..cloudAlerts = d.cloudAlerts
-      ..dustDays = d.dustDays;
+      ..dustDays = d.dustDays
+      ..textScale = d.textScale;
     s.brand
       ..company = company.text.trim()
       ..phone = phone.text.trim()
@@ -119,7 +120,6 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
         SectionCard(
           icon: Icons.language,
           title: t('select_language'),
-          tag: Tag(t('dropdown_menu'), C.sky, outlined: true),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _drop<String>(
               value: d.lang,
@@ -128,6 +128,42 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
             ),
             const SizedBox(height: 8),
             Text(t('lang_help'), style: TextStyle(color: C.mute, fontSize: 12.5)),
+          ]),
+        ),
+        SectionCard(
+          icon: Icons.format_size,
+          title: t('text_size'),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(t('text_size_sub'), style: TextStyle(color: C.mute, fontSize: 12.5)),
+            Row(children: [
+              Text('A', style: TextStyle(fontSize: 12, color: C.mute, fontWeight: FontWeight.w700)),
+              Expanded(
+                child: Slider(
+                  min: .85,
+                  max: 1.35,
+                  divisions: 10,
+                  value: d.textScale.clamp(.85, 1.35),
+                  label: '${(d.textScale * 100).round()}%',
+                  onChanged: (v) => setState(() => d.textScale = (v * 100).round() / 100),
+                ),
+              ),
+              Text('A', style: TextStyle(fontSize: 22, color: C.mute, fontWeight: FontWeight.w700)),
+            ]),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: C.chip, borderRadius: BorderRadius.circular(12)),
+              child: Text(t('size_sample'), textScaler: TextScaler.linear(d.textScale), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+            ),
+            const SizedBox(height: 6),
+            Row(children: [
+              Expanded(child: Text('${(d.textScale * 100).round()}%', style: TextStyle(color: C.mute, fontWeight: FontWeight.w700))),
+              TextButton.icon(
+                onPressed: d.textScale == 1.0 ? null : () => setState(() => d.textScale = 1.0),
+                icon: const Icon(Icons.auto_fix_high, size: 18),
+                label: Text(t('size_auto')),
+              ),
+            ]),
           ]),
         ),
         _toggleCard(Icons.battery_full_outlined, C.green, t('battery_sim'), t('battery_sub'), d.battery, (v) => setState(() => d.battery = v)),

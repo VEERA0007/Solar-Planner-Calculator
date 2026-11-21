@@ -1,5 +1,7 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 /// Marker progress 0..1 along the arc. By day: sunrise to sunset. After dark
 /// (night = true) the marker keeps travelling the arc from sunset to the next
@@ -116,6 +118,24 @@ class SunScenePainter extends CustomPainter {
   final double phase; // 0..1 ambient loop
   const SunScenePainter({required this.night, required this.t, this.phase = 0});
 
+  /// High-resolution rendered scenery (assets/scene). When loaded it replaces
+  /// the vector fallback scene.
+  static ui.Image? dayImg, nightImg;
+  static Future<void> preload() async {
+    Future<ui.Image?> load(String path) async {
+      try {
+        final data = await rootBundle.load(path);
+        final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+        return (await codec.getNextFrame()).image;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    dayImg ??= await load('assets/scene/day.jpg');
+    nightImg ??= await load('assets/scene/night.jpg');
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
@@ -133,7 +153,17 @@ class SunScenePainter extends CustomPainter {
 
     // ============ scene layer (masked so it fades into the card) ============
     canvas.saveLayer(full, Paint());
-    night ? _night(canvas, size, P, sun, height) : _day(canvas, size, P, sun, dusk);
+    final photo = night ? nightImg : dayImg;
+    if (photo != null) {
+      // cover the card with the rendered picture
+      final iw = photo.width.toDouble(), ih = photo.height.toDouble();
+      final k = math.max(w / iw, h / ih);
+      final src = Rect.fromCenter(center: Offset(iw / 2, ih / 2), width: w / k, height: h / k);
+      canvas.drawImageRect(photo, src, full, Paint()..filterQuality = FilterQuality.high);
+      night ? _nightPhoto(canvas, size, P, height) : _dayPhoto(canvas, size, P, sun, dusk);
+    } else {
+      night ? _night(canvas, size, P, sun, height) : _day(canvas, size, P, sun, dusk);
+    }
     // fade the left edge and the bottom into the card colour
     canvas.drawRect(
       full,
@@ -574,6 +604,93 @@ class SunScenePainter extends CustomPainter {
       final y = h;
       final l = h * (.08 + rnd.nextDouble() * .1);
       canvas.drawLine(Offset(x, y), Offset(x + (rnd.nextDouble() - .5) * 8, y - l), gb);
+    }
+  }
+
+  // ------------------------------------------------- overlays on the rendered scenery
+  void _cloud(Canvas canvas, Offset c, double s) {
+    final shade = Paint()..color = const Color(0xFFD5E6F7).withValues(alpha: .75)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
+    final white = Paint()..color = Colors.white.withValues(alpha: .93)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.2);
+    const blobs = [[-.9, .15, .55], [-.35, -.1, .75], [.3, -.2, .85], [.95, .1, .6], [0.0, .22, 1.0]];
+    for (final b in blobs) {
+      canvas.drawCircle(c + Offset(b[0] * s, (b[1] + .12) * s), b[2] * s * .55, shade);
+    }
+    for (final b in blobs) {
+      canvas.drawCircle(c + Offset(b[0] * s, b[1] * s), b[2] * s * .55, white);
+    }
+  }
+
+  void _dayPhoto(Canvas canvas, Size size, Offset Function(double, double) P, Offset sun, double dusk) {
+    final w = size.width, h = size.height;
+    final full = Offset.zero & size;
+    if (dusk > .01) {
+      canvas.drawRect(
+        full,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [const Color(0x00FF9A3C), const Color(0xFFFF8A3C).withValues(alpha: .40 * dusk), const Color(0x00FF9A3C)],
+            stops: const [0, .55, .78],
+          ).createShader(full),
+      );
+    }
+    canvas.drawCircle(
+      sun,
+      w * .24,
+      Paint()
+        ..shader = RadialGradient(colors: [const Color(0xFFFFF3C4).withValues(alpha: .55 * (1 - dusk * .5)), const Color(0x00FFF3C4)])
+            .createShader(Rect.fromCircle(center: sun, radius: w * .24)),
+    );
+    for (var i = 0; i < 3; i++) {
+      final x = (((i * .38 + phase * .5) % 1.4) - .2);
+      _cloud(canvas, P(x, .15 + (i % 2) * .15), h * (.075 + (i % 3) * .015));
+    }
+  }
+
+  void _nightPhoto(Canvas canvas, Size size, Offset Function(double, double) P, double height) {
+    final w = size.width, h = size.height;
+    final sp = Paint();
+    for (final s in _stars) {
+      if (s[1] > .5) continue;
+      final tw = .55 + .45 * math.sin((phase * s[4] + s[3]) * math.pi * 2);
+      sp.color = Colors.white.withValues(alpha: (.35 + .65 * s[3]) * tw);
+      canvas.drawCircle(P(s[0], s[1] * .9), s[2] * .7, sp);
+    }
+    final cl = Paint()..color = Colors.white.withValues(alpha: .28)..strokeWidth = .8;
+    void constel(List<List<double>> pts) {
+      for (var i = 0; i < pts.length - 1; i++) {
+        canvas.drawLine(P(pts[i][0], pts[i][1]), P(pts[i + 1][0], pts[i + 1][1]), cl);
+      }
+      for (final q in pts) {
+        canvas.drawCircle(P(q[0], q[1]), 1.6, Paint()..color = Colors.white.withValues(alpha: .95));
+      }
+    }
+    constel([[.10, .30], [.17, .24], [.22, .33], [.30, .28], [.27, .40]]);
+    constel([[.74, .12], [.82, .20], [.90, .14], [.95, .26], [.86, .32]]);
+    final ss = (phase * 3) % 1.0;
+    if (ss < .16) {
+      final k = ss / .16;
+      final from = P(.88 - .5 * k, .05 + .22 * k), tail = P(.88 - .5 * k + .07, .05 + .22 * k - .045);
+      canvas.drawLine(tail, from, Paint()..strokeWidth = 1.6..strokeCap = StrokeCap.round
+        ..shader = LinearGradient(colors: [Colors.white.withValues(alpha: 0), Colors.white.withValues(alpha: .9 * math.sin(k * math.pi))]).createShader(Rect.fromPoints(tail, from)));
+    }
+    final mc = P(.23, .19), mr = w * .026;
+    canvas.drawCircle(mc, mr * 2, Paint()..color = const Color(0xFFDDE8FF).withValues(alpha: .18)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7));
+    canvas.saveLayer(Rect.fromCircle(center: mc, radius: mr * 2), Paint());
+    canvas.drawCircle(mc, mr, Paint()..color = const Color(0xFFF1F5FF));
+    canvas.drawCircle(mc + Offset(mr * .6, -mr * .15), mr * .9, Paint()..blendMode = BlendMode.clear);
+    canvas.restore();
+    // pulsing status light on the battery cabinet + fireflies
+    final led = Offset(w * .889, h * .66);
+    canvas.drawCircle(led, w * .03, Paint()..color = const Color(0xFF34D399).withValues(alpha: .10 + .06 * math.sin(phase * math.pi * 2 * 8))..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9));
+    final ff = math.Random(11);
+    for (var i = 0; i < 9; i++) {
+      final bx = .30 + ff.nextDouble() * .7, by = .70 + ff.nextDouble() * .24;
+      final o = P(bx + .02 * math.sin((phase * 4 + i) * math.pi * 2), by + .02 * math.cos((phase * 3 + i) * math.pi * 2));
+      final a = .35 + .65 * math.max(0.0, math.sin((phase * 6 + i * .37) * math.pi * 2));
+      canvas.drawCircle(o, 2.6, Paint()..color = const Color(0xFFFDE68A).withValues(alpha: .35 * a)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3));
+      canvas.drawCircle(o, 1.1, Paint()..color = const Color(0xFFFEF3C7).withValues(alpha: a));
     }
   }
 

@@ -1,13 +1,23 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
-/// Marker progress 0..1 along the arc: sunrise to sunset; parked at the ends
-/// (sun below the horizon) outside daylight.
+/// Marker progress 0..1 along the arc. By day: sunrise to sunset. After dark
+/// (night = true) the marker keeps travelling the arc from sunset to the next
+/// sunrise so the card is never frozen; otherwise it parks at the ends.
 double arcProgress(DateTime now, DateTime? rise, DateTime? set, {bool night = false}) {
   if (rise == null || set == null) return .5;
   final up = now.isAfter(rise) && now.isBefore(set);
   if (up) return now.difference(rise).inSeconds / math.max(1, set.difference(rise).inSeconds);
-  return now.isBefore(rise) ? 0.0 : 1.0;
+  if (!night) return now.isBefore(rise) ? 0.0 : 1.0;
+  late DateTime from, to;
+  if (now.isBefore(rise)) {
+    from = set.subtract(const Duration(days: 1));
+    to = rise;
+  } else {
+    from = set;
+    to = rise.add(const Duration(days: 1));
+  }
+  return (now.difference(from).inSeconds / math.max(1, to.difference(from).inSeconds)).clamp(0.0, 1.0);
 }
 
 double _smooth(double a, double b, double x) {
@@ -195,18 +205,6 @@ class SunScenePainter extends CustomPainter {
     }
 
     dashed(1.0, .95, 2.6, 6, 7);
-
-    // sunset marker (half sun) where the arc meets the ground, right side
-    final hs = P(.94, .60);
-    canvas.save();
-    canvas.clipRect(Rect.fromLTWH(hs.dx - 30, hs.dy - 30, 60, 30));
-    final ray = Paint()..color = const Color(0xFFFFB020)..strokeWidth = 1.6..strokeCap = StrokeCap.round;
-    for (var i = 0; i < 9; i++) {
-      final a = math.pi + i * math.pi / 8;
-      canvas.drawLine(hs + Offset(math.cos(a), math.sin(a)) * (w * .028), hs + Offset(math.cos(a), math.sin(a)) * (w * .042), ray);
-    }
-    canvas.drawCircle(hs, w * .024, Paint()..color = const Color(0xFFFFB020));
-    canvas.restore();
 
     // ============ sun ============
     final pulse = 1 + .08 * math.sin(phase * math.pi * 2 * 6);
@@ -454,6 +452,14 @@ class SunScenePainter extends CustomPainter {
     }
     constel([[.10, .30], [.17, .24], [.22, .33], [.30, .28], [.27, .40]]);
     constel([[.74, .12], [.82, .20], [.90, .14], [.95, .26], [.86, .32]]);
+    // shooting star, loops with the ambient animation
+    final ss = (phase * 3) % 1.0;
+    if (ss < .16) {
+      final k = ss / .16;
+      final from = P(.88 - .5 * k, .05 + .22 * k), tail = P(.88 - .5 * k + .07, .05 + .22 * k - .045);
+      canvas.drawLine(tail, from, Paint()..strokeWidth = 1.6..strokeCap = StrokeCap.round
+        ..shader = LinearGradient(colors: [Colors.white.withValues(alpha: 0), Colors.white.withValues(alpha: .9 * math.sin(k * math.pi))]).createShader(Rect.fromPoints(tail, from)));
+    }
     // crescent moon
     final mc = P(.23, .19), mr = w * .026;
     canvas.drawCircle(mc, mr * 2, Paint()..color = const Color(0xFFDDE8FF).withValues(alpha: .18)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7));
@@ -586,36 +592,58 @@ class SunScenePainter extends CustomPainter {
     }
   }
 
+  /// Realistic modules: silver frame, dark monocrystalline cells with busbars,
+  /// a sky reflection, and thin gaps between modules.
   void _array(Canvas canvas, Offset fl, Offset bl, Offset br, Offset fr,
       {required int rows, required int cols, required Color top, required Color bottom, required Color frame}) {
-    Offset bil(double a, double b) {
-      final l = Offset.lerp(fl, bl, a)!, r = Offset.lerp(fr, br, a)!;
-      return Offset.lerp(l, r, b)!;
+    Offset bil(double a, double b) => Offset.lerp(Offset.lerp(fl, bl, a)!, Offset.lerp(fr, br, a)!, b)!;
+    // mounting rails behind the modules
+    final rail = Paint()..color = const Color(0xFF5B6678)..strokeWidth = 2.4..strokeCap = StrokeCap.round;
+    for (final b in const [.2, .8]) {
+      canvas.drawLine(bil(-.02, b), bil(1.02, b), rail);
     }
-    final outline = Path()..moveTo(fl.dx, fl.dy)..lineTo(bl.dx, bl.dy)..lineTo(br.dx, br.dy)..lineTo(fr.dx, fr.dy)..close();
-    canvas.drawPath(
-      outline,
-      Paint()..shader = LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [top, bottom]).createShader(outline.getBounds()),
-    );
-    // cell lines
-    final cell = Paint()..color = Colors.white.withValues(alpha: .13)..strokeWidth = .6;
-    for (var c = 0; c <= cols * 5; c++) {
-      final b = c / (cols * 5);
-      canvas.drawLine(bil(0, b), bil(1, b), cell);
+    const gap = .012;
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        final a0 = r / rows + gap, a1 = (r + 1) / rows - gap, b0 = c / cols + gap, b1 = (c + 1) / cols - gap;
+        Offset m(double a, double b) => bil(a0 + (a1 - a0) * a, b0 + (b1 - b0) * b);
+        Path quad(double inset) => Path()
+          ..moveTo(m(inset, inset).dx, m(inset, inset).dy)
+          ..lineTo(m(1 - inset, inset).dx, m(1 - inset, inset).dy)
+          ..lineTo(m(1 - inset, 1 - inset).dx, m(1 - inset, 1 - inset).dy)
+          ..lineTo(m(inset, 1 - inset).dx, m(inset, 1 - inset).dy)
+          ..close();
+        final outer = quad(0), inner = quad(.07);
+        canvas.drawPath(outer, Paint()..color = frame);
+        canvas.drawPath(
+          inner,
+          Paint()..shader = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [top, bottom]).createShader(outer.getBounds()),
+        );
+        // cells: 6 across, 4 down, with two busbars per cell column
+        final cell = Paint()..color = Colors.white.withValues(alpha: .20)..strokeWidth = .55;
+        for (var i = 1; i < 6; i++) {
+          canvas.drawLine(m(.07, .07 + .86 * i / 6), m(.93, .07 + .86 * i / 6), cell);
+        }
+        for (var j = 1; j < 4; j++) {
+          canvas.drawLine(m(.07 + .86 * j / 4, .07), m(.07 + .86 * j / 4, .93), cell);
+        }
+        final bus = Paint()..color = const Color(0xFFD9E4F5).withValues(alpha: .38)..strokeWidth = .45;
+        for (var i = 0; i < 6; i++) {
+          final x = .07 + .86 * (i + .35) / 6, y = .07 + .86 * (i + .65) / 6;
+          canvas.drawLine(m(.07, x), m(.93, x), bus);
+          canvas.drawLine(m(.07, y), m(.93, y), bus);
+        }
+        // sky reflection across the glass
+        canvas.save();
+        canvas.clipPath(inner);
+        canvas.drawRect(
+          outer.getBounds(),
+          Paint()..shader = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Colors.white.withValues(alpha: .26), Colors.white.withValues(alpha: 0)], stops: const [0, .55]).createShader(outer.getBounds()),
+        );
+        canvas.restore();
+        canvas.drawPath(outer, Paint()..color = const Color(0xFF7D8AA0)..style = PaintingStyle.stroke..strokeWidth = .7);
+      }
     }
-    for (var r = 0; r <= rows * 3; r++) {
-      final a = r / (rows * 3);
-      canvas.drawLine(bil(a, 0), bil(a, 1), cell);
-    }
-    // module frames
-    final f = Paint()..color = frame.withValues(alpha: .95)..strokeWidth = 1.3..style = PaintingStyle.stroke;
-    for (var c = 0; c <= cols; c++) {
-      canvas.drawLine(bil(0, c / cols), bil(1, c / cols), f);
-    }
-    for (var r = 0; r <= rows; r++) {
-      canvas.drawLine(bil(r / rows, 0), bil(r / rows, 1), f);
-    }
-    canvas.drawPath(outline, f..strokeWidth = 1.6);
   }
 
   @override

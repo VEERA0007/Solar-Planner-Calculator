@@ -82,7 +82,11 @@ class _SolarAppState extends State<SolarApp> {
           navigatorKey: navKey,
           title: 'Solar Planner & Calculator',
           debugShowCheckedModeBanner: false,
-          theme: theme,
+          theme: theme.copyWith(
+            navigationBarTheme: NavigationBarThemeData(
+              labelTextStyle: WidgetStatePropertyAll(TextStyle(fontSize: 11.5, height: 1.1, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurfaceVariant)),
+            ),
+          ),
           builder: (context, child) {
             final mq = MediaQuery.of(context);
             return MediaQuery(
@@ -134,7 +138,7 @@ class Shell extends StatelessWidget {
             selectedIndex: state.tab,
             onDestinationSelected: state.setTab,
             labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-            height: 72,
+            height: 76,
             destinations: [
               for (final it in _items) NavigationDestination(icon: Icon(it.$1), label: tr(state.lang, it.$2)),
             ],

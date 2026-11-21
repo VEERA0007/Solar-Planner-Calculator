@@ -95,7 +95,7 @@ class _HomePageState extends State<HomePage> {
     final lang = s.lang;
     final t = s.t;
     final night = C.dark;
-    final progress = arcProgress(now, info.rise, info.set, night: false);
+    final progress = arcProgress(now, info.rise, info.set, night: night);
     final cloud = irr?.cloud ?? 0;
     final skyKey = cloud < 20 ? 'clear_sky' : (cloud < 60 ? 'partly_cloudy' : 'overcast');
     final due = s.cleanDueInDays;
@@ -134,9 +134,11 @@ class _HomePageState extends State<HomePage> {
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Row(children: [
                         Flexible(
-                          child: Text(site.city,
-                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-                              overflow: TextOverflow.ellipsis, maxLines: 1),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(site.city, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800), maxLines: 1),
+                          ),
                         ),
                         Icon(Icons.chevron_right, color: C.mute),
                       ]),
@@ -290,13 +292,18 @@ class _HomePageState extends State<HomePage> {
                 Positioned(
                   right: 16,
                   bottom: h * .06,
+                  width: w * .56,
                   child: IgnorePointer(
-                    child: Text.rich(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text.rich(
                       TextSpan(children: [
                         TextSpan(text: '${t('peak_at')} : '),
                         TextSpan(text: info.noon == null ? '-' : clock12(info.noon!), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
                       ]),
                       style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: night ? Colors.white : const Color(0xFF1F2937)),
+                      ),
                     ),
                   ),
                 ),
@@ -305,30 +312,22 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         const SizedBox(height: 16),
-        // ---------- heading + sky chip ----------
-        Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          Expanded(
-            flex: 11,
-            child: Text(t('energy_balance'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1.25)),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            flex: 9,
-            child: Text(t('tap_metric'), style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.3)),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            flex: 11,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-              decoration: BoxDecoration(color: C.chip, borderRadius: BorderRadius.circular(16)),
-              child: Row(children: [
+        // ---------- heading + sky chip (adapts: one row when wide, stacked when narrow) ----------
+        LayoutBuilder(builder: (context, box) {
+          final heading = Text(t('energy_balance'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1.25));
+          final hint = Text(t('tap_metric'), style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.3));
+          final chip = Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            decoration: BoxDecoration(color: C.chip, borderRadius: BorderRadius.circular(16)),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(night ? Icons.nightlight_outlined : Icons.wb_cloudy_outlined, size: 18, color: C.orange),
                 const SizedBox(width: 6),
-                Expanded(
-                  child: Text(irr == null ? '…' : (cloud < 20 ? '${t(skyKey)} / Opt…' : t(skyKey)),
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5), maxLines: 2, overflow: TextOverflow.ellipsis),
-                ),
+                Text(irr == null ? '…' : (cloud < 20 ? '${t(skyKey)} / Opt…' : t(skyKey)),
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5), maxLines: 1),
+                const SizedBox(width: 10),
                 Column(mainAxisSize: MainAxisSize.min, children: [
                   Text((monthPsh ?? psh) > 0 ? (monthPsh ?? psh).toStringAsFixed(1) : '-',
                       style: TextStyle(fontFamilyFallback: kMono, color: C.amber, fontSize: 15, fontWeight: FontWeight.w700)),
@@ -336,8 +335,26 @@ class _HomePageState extends State<HomePage> {
                 ]),
               ]),
             ),
-          ),
-        ]),
+          );
+          if (box.maxWidth >= 520) {
+            return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              Expanded(flex: 11, child: heading),
+              const SizedBox(width: 8),
+              Expanded(flex: 9, child: hint),
+              const SizedBox(width: 8),
+              Expanded(flex: 11, child: chip),
+            ]);
+          }
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              Expanded(flex: 5, child: heading),
+              const SizedBox(width: 10),
+              Expanded(flex: 4, child: chip),
+            ]),
+            const SizedBox(height: 4),
+            hint,
+          ]);
+        }),
         const SizedBox(height: 12),
         // ---------- 4 display-only metric cards ----------
         _pair(

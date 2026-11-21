@@ -8,7 +8,7 @@ import '../core/sun.dart';
 import 'location_sheet.dart';
 import 'profile_dialog.dart';
 import 'settings_dialog.dart';
-import 'sun_art.dart';
+import 'sun_scene.dart';
 import 'theme.dart';
 
 String fmtTrim(double v) {
@@ -228,74 +228,81 @@ class _HomePageState extends State<HomePage> {
           ]),
         ),
         const SizedBox(height: 12),
-        // ---------- sun card ----------
+        // ---------- sun card: animated scene fills the card ----------
         Panel(
           radius: 24,
-          padding: const EdgeInsets.fromLTRB(16, 16, 12, 12),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-            Expanded(
-              flex: 40,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  Icon(Icons.change_history, size: 14, color: C.blue),
-                  const SizedBox(width: 4),
-                  Flexible(child: Text(t('altitude'), style: TextStyle(color: C.mute, fontSize: 13))),
-                ]),
-                const SizedBox(height: 2),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text('${pos.alt >= 0 ? '+' : ''}${pos.alt.toStringAsFixed(2)}°',
-                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
-                ),
-                Divider(color: C.line, height: 20),
-                Row(children: [
-                  Icon(Icons.wb_sunny_outlined, size: 16, color: C.orange),
-                  const SizedBox(width: 5),
-                  Flexible(child: Text(t('sun_status'), style: TextStyle(color: C.mute, fontSize: 13))),
-                ]),
-                const SizedBox(height: 2),
-                Row(children: [
-                  Flexible(
-                    child: Text(pos.alt > 0 ? compassName(lang, pos.az) : t('below_horizon'),
-                        style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          padding: EdgeInsets.zero,
+          child: AspectRatio(
+            aspectRatio: 2.3,
+            child: LayoutBuilder(builder: (context, box) {
+              final w = box.maxWidth, h = box.maxHeight;
+              return Stack(children: [
+                Positioned.fill(child: SunScene(night: night, t: progress)),
+                Positioned(
+                  left: 16,
+                  top: 10,
+                  bottom: 10,
+                  width: w * .40,
+                  child: IgnorePointer(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: SizedBox(
+                        width: 150,
+                        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            Icon(Icons.change_history, size: 14, color: C.blue),
+                            const SizedBox(width: 4),
+                            Flexible(child: Text(t('altitude'), style: TextStyle(color: C.mute, fontSize: 13))),
+                          ]),
+                          const SizedBox(height: 2),
+                          Text('${pos.alt >= 0 ? '+' : ''}${pos.alt.toStringAsFixed(2)}°',
+                              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+                          Divider(color: C.line, height: 18),
+                          Row(children: [
+                            Icon(Icons.wb_sunny_outlined, size: 16, color: C.orange),
+                            const SizedBox(width: 5),
+                            Flexible(child: Text(t('sun_status'), style: TextStyle(color: C.mute, fontSize: 13))),
+                          ]),
+                          const SizedBox(height: 2),
+                          Row(children: [
+                            Flexible(
+                              child: Text(pos.alt > 0 ? compassName(lang, pos.az) : t('below_horizon'),
+                                  style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+                            ),
+                            const SizedBox(width: 6),
+                            _Dot(pos.alt > 0 ? C.sun : C.mute, 11),
+                          ]),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            _Dot(C.green, 8),
+                            const SizedBox(width: 5),
+                            Flexible(
+                              child: Text('${fmt1(soFar * kCo2PerKwh)} ${t('co2_avoided')}',
+                                  style: TextStyle(fontFamilyFallback: kMono, color: C.green, fontSize: 11.5)),
+                            ),
+                          ]),
+                        ]),
+                      ),
+                    ),
                   ),
-                  const SizedBox(width: 6),
-                  _Dot(pos.alt > 0 ? C.sun : C.mute, 11),
-                ]),
-                const SizedBox(height: 8),
-                Row(children: [
-                  _Dot(C.green, 8),
-                  const SizedBox(width: 5),
-                  Flexible(
-                    child: Text('${fmt1(soFar * kCo2PerKwh)} ${t('co2_avoided')}',
-                        style: TextStyle(fontFamilyFallback: kMono, color: C.green, fontSize: 11.5)),
+                ),
+                Positioned(
+                  right: 16,
+                  bottom: h * .06,
+                  child: IgnorePointer(
+                    child: Text.rich(
+                      TextSpan(children: [
+                        TextSpan(text: '${t('peak_at')} : '),
+                        TextSpan(text: info.noon == null ? '-' : clock12(info.noon!), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
+                      ]),
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: night ? Colors.white : const Color(0xFF1F2937)),
+                    ),
                   ),
-                ]),
-              ]),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: 60,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                AspectRatio(
-                  aspectRatio: 320 / 190,
-                  child: CustomPaint(painter: SunArtPainter(night: night, t: progress, dark: C.dark)),
                 ),
-                const SizedBox(height: 6),
-                Text.rich(
-                  TextSpan(children: [
-                    TextSpan(text: '${t('peak_at')} : '),
-                    TextSpan(
-                        text: info.noon == null ? '-' : clock12(info.noon!),
-                        style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
-                  ]),
-                  textAlign: TextAlign.right,
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ]),
-            ),
-          ]),
+              ]);
+            }),
+          ),
         ),
         const SizedBox(height: 16),
         // ---------- heading + sky chip ----------

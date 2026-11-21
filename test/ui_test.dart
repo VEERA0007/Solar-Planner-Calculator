@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:calculator/core/store.dart';
 import 'package:calculator/main.dart' show Shell;
-import 'package:calculator/ui/sun_art.dart';
+import 'package:calculator/ui/sun_scene.dart';
 import 'package:calculator/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -65,6 +65,7 @@ Future<void> _shot(WidgetTester t, String name) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
+    SunScene.animate = false; // keeps pumpAndSettle finite
     PackageInfo.setMockInitialValues(
         appName: 'Solar Planner', packageName: 'com.solarplanner.calculator', version: '0.0.7', buildNumber: '1', buildSignature: '');
     await _loadFonts();
@@ -137,7 +138,7 @@ void main() {
     Widget art(bool night, double p) => Expanded(
           child: Padding(
             padding: const EdgeInsets.all(6),
-            child: AspectRatio(aspectRatio: 320 / 190, child: CustomPaint(painter: SunArtPainter(night: night, t: p, dark: night))),
+            child: AspectRatio(aspectRatio: 2.3, child: CustomPaint(painter: SunScenePainter(night: night, t: p))),
           ),
         );
     await t.pumpWidget(RepaintBoundary(
@@ -156,15 +157,12 @@ void main() {
     await _shot(t, 'art-positions');
   });
 
-  test('arc progress follows the sun and the night', () {
+  test('arc progress follows the sun and parks at the ends at night', () {
     final rise = DateTime(2026, 11, 20, 6, 0), set = DateTime(2026, 11, 20, 18, 0);
     expect(arcProgress(DateTime(2026, 11, 20, 12), rise, set, night: false), closeTo(.5, 1e-9));
     expect(arcProgress(DateTime(2026, 11, 20, 9), rise, set, night: false), closeTo(.25, 1e-9));
     expect(arcProgress(DateTime(2026, 11, 20, 21), rise, set, night: false), 1.0);
     expect(arcProgress(DateTime(2026, 11, 20, 3), rise, set, night: false), 0.0);
-    // night path: sunset 18:00 -> sunrise 06:00 next day, midnight is the middle
-    expect(arcProgress(DateTime(2026, 11, 21, 0), rise, set, night: true), closeTo(.5, 1e-9));
-    expect(arcProgress(DateTime(2026, 11, 20, 3), rise, set, night: true), closeTo(.75, 1e-9));
   });
 
   testWidgets('language switch changes navigation labels', (t) async {

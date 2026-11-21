@@ -517,26 +517,48 @@ class SunScenePainter extends CustomPainter {
         ..quadraticBezierTo(P(.14, .66).dx, P(.14, .66).dy, P(.27, .70).dx, P(.27, .70).dy),
       Paint()..color = const Color(0xFF3B4A55).withValues(alpha: .6)..style = PaintingStyle.stroke..strokeWidth = h * .035..strokeCap = StrokeCap.round,
     );
-    // back array
-    _legs(canvas, P(.48, .66), P(.84, .64), h * .1, const Color(0xFF6F7C92));
-    _array(canvas, P(.46, .66), P(.52, .52), P(.92, .53), P(.84, .67), rows: 2, cols: 4, top: const Color(0xFF1B3274), bottom: const Color(0xFF0E1D4C), frame: const Color(0xFF9FB6E8));
-    // front array
-    _legs(canvas, P(.22, .80), P(.62, .83), h * .12, const Color(0xFF8795AB));
-    _array(canvas, P(.21, .79), P(.33, .62), P(.68, .63), P(.61, .84), rows: 2, cols: 3, top: const Color(0xFF223B85), bottom: const Color(0xFF0F2058), frame: const Color(0xFFB7C8F0));
-    // conduits
-    final pipe = Paint()..color = const Color(0xFFB9C3D6).withValues(alpha: .8)..style = PaintingStyle.stroke..strokeWidth = 1.4;
-    canvas.drawPath(Path()..moveTo(P(.46, .84).dx, P(.46, .84).dy)..quadraticBezierTo(P(.55, .90).dx, P(.55, .90).dy, P(.69, .87).dx, P(.69, .87).dy), pipe);
-    // battery unit
-    final bat = RRect.fromRectAndRadius(Rect.fromPoints(P(.675, .86), P(.785, .60)), Radius.circular(w * .012));
-    canvas.drawRRect(bat, Paint()..shader = const LinearGradient(colors: [Color(0xFFDCE4F2), Color(0xFFF8FAFF), Color(0xFFC6D0E2)]).createShader(bat.outerRect));
-    canvas.drawCircle(Offset(bat.center.dx, bat.top + bat.height * .17), w * .007, Paint()..color = const Color(0xFF38BDF8));
-    canvas.drawCircle(Offset(bat.center.dx, bat.top + bat.height * .27), w * .005, Paint()..color = const Color(0xFF34D399));
-    canvas.drawRect(Rect.fromLTWH(bat.left, bat.bottom - bat.height * .18, bat.width, bat.height * .18), Paint()..color = const Color(0xFF273244));
-    // inverter with glow
-    final inv = Rect.fromPoints(P(.83, .74), P(.88, .66));
-    canvas.drawCircle(inv.center, w * .035, Paint()..color = const Color(0xFF38BDF8).withValues(alpha: .22 + .08 * math.sin(phase * math.pi * 2 * 8))..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7));
-    canvas.drawRRect(RRect.fromRectAndRadius(inv, const Radius.circular(2)), Paint()..color = const Color(0xFFE6ECF6));
-    canvas.drawRect(Rect.fromLTWH(inv.left + 3, inv.top + 3, inv.width - 6, 2.5), Paint()..color = const Color(0xFF22C55E));
+    // large array, same layout as the day scene, with a faint moonlit sheen
+    final fl = P(.255, .67), bl = P(.435, .40), br = P(.80, .385), fr = P(.70, .655);
+    _legs(canvas, fl, fr, h * .10, const Color(0xFF7D8BA3));
+    _array(canvas, fl, bl, br, fr, rows: 3, cols: 5, top: const Color(0xFF2A4694), bottom: const Color(0xFF0F2058), frame: const Color(0xFFB7C8F0));
+    canvas.drawPath(
+      Path()..moveTo(fl.dx, fl.dy)..lineTo(bl.dx, bl.dy)..lineTo(Offset.lerp(bl, br, .4)!.dx, Offset.lerp(bl, br, .4)!.dy)..lineTo(Offset.lerp(fl, fr, .4)!.dx, Offset.lerp(fl, fr, .4)!.dy)..close(),
+      Paint()..color = const Color(0xFFBFD4FF).withValues(alpha: .08),
+    );
+    // battery cabinet with glowing status lights
+    final cab = Rect.fromPoints(P(.79, .75), P(.885, .56));
+    canvas.drawCircle(cab.center, w * .06, Paint()..color = const Color(0xFF34D399).withValues(alpha: .10 + .05 * math.sin(phase * math.pi * 2 * 8))..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9));
+    final bat = RRect.fromRectAndRadius(cab, Radius.circular(w * .008));
+    canvas.drawRRect(bat, Paint()..shader = const LinearGradient(colors: [Color(0xFFE3EAF5), Color(0xFFF8FAFF), Color(0xFFC6D0E2)]).createShader(cab));
+    for (var i = 0; i < 4; i++) {
+      canvas.drawRect(Rect.fromLTWH(cab.left + cab.width * .18, cab.top + cab.height * (.12 + i * .045), cab.width * .64, cab.height * .028), Paint()..color = const Color(0xFF34D399).withValues(alpha: i == 3 ? .5 + .4 * math.sin(phase * math.pi * 2 * 6) : .95));
+    }
+    final bc = Offset(cab.center.dx, cab.top + cab.height * .66);
+    final bs = cab.height * .17;
+    canvas.drawPath(
+      Path()
+        ..moveTo(bc.dx + bs * .15, bc.dy - bs)
+        ..lineTo(bc.dx - bs * .55, bc.dy + bs * .12)
+        ..lineTo(bc.dx - bs * .05, bc.dy + bs * .12)
+        ..lineTo(bc.dx - bs * .2, bc.dy + bs)
+        ..lineTo(bc.dx + bs * .55, bc.dy - bs * .2)
+        ..lineTo(bc.dx + bs * .05, bc.dy - bs * .2)
+        ..close(),
+      Paint()..color = const Color(0xFF2F7BFF),
+    );
+    canvas.drawPath(
+      Path()..moveTo(fr.dx, fr.dy + h * .08)..quadraticBezierTo((fr.dx + cab.left) / 2, cab.bottom + h * .09, cab.left, cab.bottom - h * .02),
+      Paint()..color = const Color(0xFF9FB0C8).withValues(alpha: .7)..style = PaintingStyle.stroke..strokeWidth = 1.4,
+    );
+    // fireflies
+    final ff = math.Random(11);
+    for (var i = 0; i < 9; i++) {
+      final bx = .30 + ff.nextDouble() * .7, by = .66 + ff.nextDouble() * .24;
+      final o = P(bx + .02 * math.sin((phase * 4 + i) * math.pi * 2), by + .02 * math.cos((phase * 3 + i) * math.pi * 2));
+      final a = .35 + .65 * math.max(0.0, math.sin((phase * 6 + i * .37) * math.pi * 2));
+      canvas.drawCircle(o, 2.6, Paint()..color = const Color(0xFFFDE68A).withValues(alpha: .35 * a)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3));
+      canvas.drawCircle(o, 1.1, Paint()..color = const Color(0xFFFEF3C7).withValues(alpha: a));
+    }
     // foreground grass blades
     final gb = Paint()..color = const Color(0xFF070F0C)..strokeWidth = 2..strokeCap = StrokeCap.round;
     final rnd = math.Random(3);

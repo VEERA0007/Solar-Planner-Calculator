@@ -297,12 +297,19 @@ class _HomePageState extends State<HomePage> {
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerRight,
-                      child: Text.rich(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: (night ? Colors.black : Colors.white).withValues(alpha: night ? .35 : .72),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text.rich(
                       TextSpan(children: [
                         TextSpan(text: '${t('peak_at')} : '),
                         TextSpan(text: info.noon == null ? '-' : clock12(info.noon!), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
                       ]),
                       style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: night ? Colors.white : const Color(0xFF1F2937)),
+                      ),
                       ),
                     ),
                   ),

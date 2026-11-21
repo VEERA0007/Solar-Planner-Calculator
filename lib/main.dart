@@ -158,10 +158,14 @@ class _NavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final slot = MediaQuery.sizeOf(context).width.clamp(0, 760) / items.length;
+    final fs = (slot / 9.6).clamp(8.8, 12.5).toDouble();
     return Material(
       color: Theme.of(context).navigationBarTheme.backgroundColor ?? cs.surfaceContainer,
-      elevation: 3,
-      child: SafeArea(
+      elevation: 0,
+      child: DecoratedBox(
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: cs.outlineVariant.withValues(alpha: .6)))),
+        child: SafeArea(
         top: false,
         child: SizedBox(
           height: 66,
@@ -193,7 +197,7 @@ class _NavBar extends StatelessWidget {
                             items[i].$2,
                             maxLines: 1,
                             textScaler: TextScaler.noScaling,
-                            style: TextStyle(fontSize: 12, fontWeight: i == index ? FontWeight.w800 : FontWeight.w600, color: i == index ? cs.primary : cs.onSurfaceVariant),
+                            style: TextStyle(fontSize: fs, fontWeight: i == index ? FontWeight.w800 : FontWeight.w600, color: i == index ? cs.primary : cs.onSurfaceVariant),
                           ),
                         ),
                       ),
@@ -203,6 +207,7 @@ class _NavBar extends StatelessWidget {
               ),
           ]),
         ),
+      ),
       ),
     );
   }

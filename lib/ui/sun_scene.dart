@@ -362,7 +362,7 @@ class SunScenePainter extends CustomPainter {
       Paint()..color = const Color(0xFF2B6126).withValues(alpha: .38)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
     );
     _legs(canvas, fl, fr, h * .10, const Color(0xFF8E98A8));
-    _array(canvas, fl, bl, br, fr, rows: 3, cols: 5, top: const Color(0xFF2A66D8), bottom: const Color(0xFF0C2A7E), frame: const Color(0xFFEFF5FC));
+    _array(canvas, fl, bl, br, fr, rows: 3, cols: 5, top: const Color(0xFF1B4DB8), bottom: const Color(0xFF081C5C), frame: const Color(0xFFD5DEEA));
     // glossy sheen: a bright band sweeping across the panels, stronger with the sun high
     final lit = (1 - dusk).clamp(0.0, 1.0);
     final g = (phase * 3) % 1.0;
@@ -613,21 +613,21 @@ class SunScenePainter extends CustomPainter {
           ..lineTo(m(1 - inset, 1 - inset).dx, m(1 - inset, 1 - inset).dy)
           ..lineTo(m(inset, 1 - inset).dx, m(inset, 1 - inset).dy)
           ..close();
-        final outer = quad(0), inner = quad(.07);
+        final outer = quad(0), inner = quad(.05);
         canvas.drawPath(outer, Paint()..color = frame);
         canvas.drawPath(
           inner,
           Paint()..shader = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [top, bottom]).createShader(outer.getBounds()),
         );
         // cells: 6 across, 4 down, with two busbars per cell column
-        final cell = Paint()..color = Colors.white.withValues(alpha: .20)..strokeWidth = .55;
+        final cell = Paint()..color = Colors.white.withValues(alpha: .11)..strokeWidth = .5;
         for (var i = 1; i < 6; i++) {
           canvas.drawLine(m(.07, .07 + .86 * i / 6), m(.93, .07 + .86 * i / 6), cell);
         }
         for (var j = 1; j < 4; j++) {
           canvas.drawLine(m(.07 + .86 * j / 4, .07), m(.07 + .86 * j / 4, .93), cell);
         }
-        final bus = Paint()..color = const Color(0xFFD9E4F5).withValues(alpha: .38)..strokeWidth = .45;
+        final bus = Paint()..color = const Color(0xFFD9E4F5).withValues(alpha: .20)..strokeWidth = .4;
         for (var i = 0; i < 6; i++) {
           final x = .07 + .86 * (i + .35) / 6, y = .07 + .86 * (i + .65) / 6;
           canvas.drawLine(m(.07, x), m(.93, x), bus);
@@ -638,7 +638,7 @@ class SunScenePainter extends CustomPainter {
         canvas.clipPath(inner);
         canvas.drawRect(
           outer.getBounds(),
-          Paint()..shader = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Colors.white.withValues(alpha: .26), Colors.white.withValues(alpha: 0)], stops: const [0, .55]).createShader(outer.getBounds()),
+          Paint()..shader = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Colors.white.withValues(alpha: .15), Colors.white.withValues(alpha: 0)], stops: const [0, .5]).createShader(outer.getBounds()),
         );
         canvas.restore();
         canvas.drawPath(outer, Paint()..color = const Color(0xFF7D8AA0)..style = PaintingStyle.stroke..strokeWidth = .7);

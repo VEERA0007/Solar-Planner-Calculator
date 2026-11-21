@@ -43,7 +43,7 @@ class Place {
       if (p.isNotEmpty && !parts.contains(p)) parts.add(p);
     }
     final loc = parts.isEmpty ? region : parts.join(', ');
-    return '${plusCodeShort(lat, lng)} $loc'.trim();
+    return loc.isEmpty ? plusCodeShort(lat, lng) : '${plusCodeShort(lat, lng)}, $loc';
   }
 }
 

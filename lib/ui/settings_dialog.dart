@@ -4,6 +4,7 @@ import '../core/i18n.dart';
 import '../core/store.dart';
 import '../core/update.dart';
 import 'theme.dart';
+import 'widgets.dart';
 
 Future<void> showSettingsDialog(BuildContext context, AppState s) =>
     showDialog<void>(context: context, builder: (_) => _SettingsDialog(state: s));
@@ -81,30 +82,32 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
     });
   }
 
-  Widget _label(String text, {Widget? trailing}) => Padding(
-        padding: const EdgeInsets.only(top: 14, bottom: 6),
-        child: Row(children: [
-          Expanded(child: Text(text, style: TextStyle(color: C.mute, fontSize: 12.5, fontWeight: FontWeight.w700, letterSpacing: .3))),
-          if (trailing != null) trailing,
-        ]),
+  String _trim(double v) {
+    final t = v.toStringAsFixed(2);
+    return t.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  Widget _drop<T>({required T value, required List<DropdownMenuItem<T>> items, required ValueChanged<T?> onChanged, Key? key}) =>
+      DropdownButtonFormField<T>(
+        key: key,
+        initialValue: value,
+        isExpanded: true,
+        icon: Icon(Icons.keyboard_arrow_down, color: C.mute),
+        decoration: plainField(),
+        style: TextStyle(color: C.text, fontWeight: FontWeight.w700, fontSize: 15.5),
+        items: items,
+        onChanged: onChanged,
       );
 
-  Widget _pill(String text, Color c) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-        decoration: BoxDecoration(color: c.withValues(alpha: .14), borderRadius: BorderRadius.circular(99)),
-        child: Text(text, style: TextStyle(color: c, fontSize: 11, fontWeight: FontWeight.w700)),
-      );
-
-  Widget _switchRow(String title, String sub, bool v, ValueChanged<bool> on, {IconData? icon}) => Container(
-        margin: const EdgeInsets.only(top: 12),
-        padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
-        decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.line)),
+  Widget _toggleCard(IconData icon, Color ic, String title, String sub, bool v, ValueChanged<bool> on) => SectionCard(
         child: Row(children: [
-          if (icon != null) ...[Icon(icon, color: C.blue), const SizedBox(width: 10)],
+          Icon(icon, color: ic, size: 22),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-              if (sub.isNotEmpty) Text(sub, style: TextStyle(color: C.mute, fontSize: 12)),
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              const SizedBox(height: 2),
+              Text(sub, style: TextStyle(color: C.mute, fontSize: 12.5)),
             ]),
           ),
           Switch(value: v, onChanged: on),
@@ -112,40 +115,49 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
       );
 
   // ------------------------------ tabs ------------------------------
-  Widget _display() => ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 16), children: [
-        _label(t('language')),
-        DropdownButtonFormField<String>(
-          initialValue: d.lang,
-          isExpanded: true,
-          decoration: const InputDecoration(prefixIcon: Icon(Icons.language)),
-          items: [for (final e in kLangs.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-          onChanged: (v) => setState(() => d.lang = v ?? d.lang),
+  Widget _display() => ListView(padding: const EdgeInsets.fromLTRB(16, 14, 16, 8), children: [
+        SectionCard(
+          icon: Icons.language,
+          title: t('select_language'),
+          tag: Tag(t('dropdown_menu'), C.sky, outlined: true),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _drop<String>(
+              value: d.lang,
+              items: [for (final e in kLangs.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+              onChanged: (v) => setState(() => d.lang = v ?? d.lang),
+            ),
+            const SizedBox(height: 8),
+            Text(t('lang_help'), style: TextStyle(color: C.mute, fontSize: 12.5)),
+          ]),
         ),
-        _switchRow(t('battery_sim'), t('battery_sub'), d.battery, (v) => setState(() => d.battery = v), icon: Icons.battery_charging_full),
-        Container(
-          margin: const EdgeInsets.only(top: 12),
-          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-          decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.line)),
-          child: Column(children: [
+        _toggleCard(Icons.battery_full_outlined, C.green, t('battery_sim'), t('battery_sub'), d.battery, (v) => setState(() => d.battery = v)),
+        SectionCard(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Row(children: [
-              Icon(Icons.wifi_tethering, color: C.green),
+              Icon(Icons.wifi_tethering, color: C.sky, size: 22),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(t('hourly_sync'), style: const TextStyle(fontWeight: FontWeight.w700)),
-                  Text(
-                    s.lastSync == null
-                        ? '--:--'
-                        : '${t('updated')}: ${s.lastSync!.hour.toString().padLeft(2, '0')}:${s.lastSync!.minute.toString().padLeft(2, '0')}',
-                    style: TextStyle(color: C.mute, fontSize: 12, fontFamilyFallback: kMono),
-                  ),
+                  Text(t('hourly_sync'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  const SizedBox(height: 2),
+                  Text(t('sync_sub'), style: TextStyle(color: C.mute, fontSize: 12.5)),
                 ]),
               ),
               Switch(value: d.autoSync, onChanged: (v) => setState(() => d.autoSync = v)),
             ]),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
+            Divider(color: C.line, height: 22),
+            Row(children: [
+              Icon(Icons.schedule, size: 17, color: C.mute),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  s.lastSync == null
+                      ? '--:--'
+                      : '${t('updated')}: ${s.lastSync!.hour.toString().padLeft(2, '0')}:${s.lastSync!.minute.toString().padLeft(2, '0')}',
+                  style: TextStyle(color: C.mute, fontSize: 13, fontFamilyFallback: kMono),
+                ),
+              ),
+              FilledButton.icon(
                 onPressed: s.syncing
                     ? null
                     : () async {
@@ -153,29 +165,38 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
                         if (mounted) setState(() {});
                       },
                 icon: const Icon(Icons.sync, size: 18),
-                label: Text(t('sync_now')),
+                label: Text(t('sync_now'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12)),
               ),
-            ),
+            ]),
           ]),
         ),
-        _label(t('company')),
-        TextField(controller: company, decoration: const InputDecoration()),
-        _label(t('company_phone')),
-        TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration()),
-        _label('Quote note'),
-        TextField(controller: note, maxLines: 2, decoration: const InputDecoration()),
-        _label(t('about')),
-        Text('Version ${version.isEmpty ? '...' : version}', style: TextStyle(color: C.mute)),
-        const SizedBox(height: 8),
-        Wrap(spacing: 10, runSpacing: 8, children: [
-          OutlinedButton(onPressed: checking ? null : _check, child: Text(checking ? '…' : 'Check for updates')),
-          if (pending != null) FilledButton(onPressed: () => openUpdate(pending!), child: const Text('Download update')),
-        ]),
-        if (updateMsg.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(updateMsg, style: TextStyle(color: C.mute, fontSize: 12.5))),
-        const SizedBox(height: 14),
-        Text(
-          'Sun data: NASA POWER long-term averages and Open-Meteo live weather. Place search: Open-Meteo, BigDataCloud.',
-          style: TextStyle(color: C.mute, fontSize: 11),
+        SectionCard(
+          icon: Icons.receipt_long_outlined,
+          title: t('company'),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            TextField(controller: company, decoration: plainField()),
+            FieldLabel(t('company_phone')),
+            TextField(controller: phone, keyboardType: TextInputType.phone, decoration: plainField()),
+            FieldLabel('Quote note'),
+            TextField(controller: note, maxLines: 2, decoration: plainField()),
+          ]),
+        ),
+        SectionCard(
+          icon: Icons.info_outline,
+          title: t('about'),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Version ${version.isEmpty ? '...' : version}', style: TextStyle(color: C.mute)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 10, runSpacing: 8, children: [
+              OutlinedButton(onPressed: checking ? null : _check, child: Text(checking ? '…' : 'Check for updates')),
+              if (pending != null) FilledButton(onPressed: () => openUpdate(pending!), child: const Text('Download update')),
+            ]),
+            if (updateMsg.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(updateMsg, style: TextStyle(color: C.mute, fontSize: 12.5))),
+            const SizedBox(height: 10),
+            Text('Sun data: NASA POWER long-term averages and Open-Meteo live weather. Place search: Open-Meteo, BigDataCloud.',
+                style: TextStyle(color: C.mute, fontSize: 11)),
+          ]),
         ),
       ]);
 
@@ -188,100 +209,178 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
     final units = s.monthlyUnits;
     final price = cat.marginal(units);
     final lang = d.lang;
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 16), children: [
-      _label(t('state'), trailing: _pill(t('auto_synced'), C.green)),
-      DropdownButtonFormField<String>(
-        key: ValueKey('st_${d.stateId}'),
-        initialValue: d.stateId,
-        isExpanded: true,
-        decoration: const InputDecoration(prefixIcon: Icon(Icons.map_outlined)),
-        items: [for (final x in book.states) DropdownMenuItem(value: x.id, child: Text(x.name(lang)))],
-        onChanged: (v) => setState(() {
-          d.stateId = v ?? d.stateId;
-          d.discomId = book.byId(d.stateId).discoms.first.id;
-        }),
-      ),
-      _label('${t('grids_in')} ${st.name(lang)}'),
-      DropdownButtonFormField<String>(
-        key: ValueKey('dc_${d.stateId}_${d.discomId}'),
-        initialValue: d.discomId,
-        isExpanded: true,
-        decoration: const InputDecoration(prefixIcon: Icon(Icons.bolt)),
-        items: [for (final x in st.discoms) DropdownMenuItem(value: x.id, child: Text(x.name))],
-        onChanged: (v) => setState(() => d.discomId = v ?? d.discomId),
-      ),
-      Padding(
-        padding: const EdgeInsets.only(top: 6, left: 4),
-        child: Text(dis.coverage, style: TextStyle(color: C.mute, fontSize: 12)),
-      ),
-      _label(t('category')),
-      SegmentedButton<String>(
-        showSelectedIcon: false,
-        segments: [
-          ButtonSegment(value: 'domestic', label: Text(t('domestic'), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ButtonSegment(value: 'commercial', label: Text(t('commercial'), maxLines: 1, overflow: TextOverflow.ellipsis)),
-          ButtonSegment(value: 'industrial', label: Text(t('industrial'), maxLines: 1, overflow: TextOverflow.ellipsis)),
-        ],
-        selected: {d.category},
-        onSelectionChanged: (v) => setState(() => d.category = v.first),
-      ),
-      Padding(
-        padding: const EdgeInsets.only(top: 6, left: 4),
-        child: Text('${cat.label} (${cat.slabLabel(units)})', style: TextStyle(color: C.mute, fontSize: 12)),
-      ),
-      _label(t('unit_price')),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-        child: Row(children: [
-          Icon(Icons.lock_outline, size: 18, color: C.mute),
-          const SizedBox(width: 10),
-          Expanded(child: Text('₹ ${price.toStringAsFixed(2)}', style: TextStyle(fontFamilyFallback: kMono, fontSize: 20, fontWeight: FontWeight.w700, color: C.amber))),
-          _pill(t('auto_synced'), C.green),
-        ]),
-      ),
-      Padding(
-        padding: const EdgeInsets.only(top: 6, left: 4),
-        child: Text(
-          '${units.round()} units/month · avg ₹${cat.average(units).toStringAsFixed(2)}/unit\n${st.order} · ${st.effective}',
-          style: TextStyle(color: C.mute, fontSize: 11.5),
+    final stName = st.name(lang);
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 14, 16, 8), children: [
+      SectionCard(
+        icon: Icons.location_on_outlined,
+        title: t('select_state'),
+        tag: Text(t('auto_synced'), style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 12.5)),
+        child: _drop<String>(
+          key: ValueKey('st_${d.stateId}'),
+          value: d.stateId,
+          items: [for (final x in book.states) DropdownMenuItem(value: x.id, child: Text(x.name(lang)))],
+          onChanged: (v) => setState(() {
+            d.stateId = v ?? d.stateId;
+            d.discomId = book.byId(d.stateId).discoms.first.id;
+          }),
         ),
       ),
-      const SizedBox(height: 14),
-      Wrap(spacing: 10, runSpacing: 8, children: [
-        _chip(Icons.wb_sunny_outlined, '${t('solar_pr')} ${st.pr.toStringAsFixed(1)}%', C.sun),
-        _chip(Icons.swap_horiz, '${t('export_credit')} ${st.exportRate == null ? t('not_applicable') : '₹${st.exportRate!.toStringAsFixed(2)}/kWh'}', C.green),
-      ]),
+      SectionCard(
+        icon: Icons.apartment,
+        iconColor: C.purple,
+        title: '${t('grids_in')} $stName',
+        tag: Text('DISCOM', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12.5)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _drop<String>(
+            key: ValueKey('dc_${d.stateId}_${d.discomId}'),
+            value: d.discomId,
+            items: [for (final x in st.discoms) DropdownMenuItem(value: x.id, child: Text(x.name))],
+            onChanged: (v) => setState(() => d.discomId = v ?? d.discomId),
+          ),
+          const SizedBox(height: 8),
+          Text('${t('coverage')}: ${dis.coverage}', style: TextStyle(color: C.mute, fontSize: 12.5)),
+        ]),
+      ),
+      SectionCard(
+        title: t('category'),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            for (final c in const ['domestic', 'commercial', 'industrial']) ...[
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => d.category = c),
+                  child: Container(
+                    height: 46,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: d.category == c ? const Color(0xFF0A84D8) : C.chip,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: d.category == c ? const Color(0xFF0A84D8) : C.line),
+                    ),
+                    child: Text(t(c),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: d.category == c ? Colors.white : C.text)),
+                  ),
+                ),
+              ),
+              if (c != 'industrial') const SizedBox(width: 8),
+            ]
+          ]),
+          const SizedBox(height: 8),
+          Text('${cat.label} (${cat.slabLabel(units)})', style: TextStyle(color: C.mute, fontSize: 12.5)),
+        ]),
+      ),
+      SectionCard(
+        icon: Icons.bolt,
+        iconColor: C.green,
+        title: t('unit_price'),
+        tint: C.green.withValues(alpha: C.dark ? .08 : .07),
+        border: C.green.withValues(alpha: .55),
+        tag: Tag(t('auto_synced'), C.green),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.green.withValues(alpha: .7))),
+            child: Row(children: [
+              Expanded(child: Text(_trim(price), style: TextStyle(fontFamilyFallback: kMono, fontSize: 19, fontWeight: FontWeight.w800, color: C.text))),
+              Text(t('per_unit'), style: TextStyle(color: C.mute, fontWeight: FontWeight.w700)),
+            ]),
+          ),
+          const SizedBox(height: 8),
+          Text('${t('approved_tariff')} $stName (${t(d.category).toUpperCase()})', style: TextStyle(color: C.green, fontSize: 12.5)),
+          const SizedBox(height: 2),
+          Text('${units.round()} units/month · ${st.order} · ${st.effective}', style: TextStyle(color: C.mute, fontSize: 11)),
+        ]),
+      ),
+      SectionCard(
+        tint: C.amber.withValues(alpha: C.dark ? .08 : .08),
+        border: C.amber.withValues(alpha: .35),
+        child: Row(children: [
+          Icon(Icons.show_chart, color: C.amber, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(t('pr_title'), style: TextStyle(color: C.amber, fontWeight: FontWeight.w800, fontSize: 15)),
+              Text('${t('pr_sub')} $stName', style: TextStyle(color: C.amber.withValues(alpha: .85), fontSize: 12.5)),
+            ]),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(color: C.amber.withValues(alpha: .22), borderRadius: BorderRadius.circular(99)),
+            child: Text('${st.pr.toStringAsFixed(1)}%', style: TextStyle(color: C.amber, fontWeight: FontWeight.w800)),
+          ),
+        ]),
+      ),
+      SectionCard(
+        child: Row(children: [
+          Icon(Icons.trending_up, color: C.sky, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(t('export_credit'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              Text(t('export_sub'), style: TextStyle(color: C.mute, fontSize: 12.5)),
+            ]),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(color: C.sky.withValues(alpha: .18), borderRadius: BorderRadius.circular(99)),
+            child: Text(st.exportRate == null ? t('not_applicable') : '₹${st.exportRate!.toStringAsFixed(2)} / kWh',
+                style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 13)),
+          ),
+        ]),
+      ),
     ]);
   }
 
-  Widget _chip(IconData i, String text, Color c) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(color: c.withValues(alpha: .12), borderRadius: BorderRadius.circular(14), border: Border.all(color: c.withValues(alpha: .4))),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(i, size: 16, color: c),
-          const SizedBox(width: 6),
-          Flexible(child: Text(text, style: TextStyle(color: c, fontWeight: FontWeight.w700, fontSize: 12.5))),
-        ]),
-      );
-
-  Widget _alerts() => ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 16), children: [
-        _label(t('dust_reminder')),
-        Wrap(spacing: 10, children: [
-          for (final n in const [15, 30, 45, 60])
-            ChoiceChip(
-              label: Text('${n}d'),
-              selected: d.dustDays == n,
-              onSelected: (_) => setState(() => d.dustDays = n),
+  Widget _alerts() => ListView(padding: const EdgeInsets.fromLTRB(16, 14, 16, 8), children: [
+        SectionCard(
+          icon: Icons.notifications_none,
+          title: t('dust_reminder'),
+          child: Row(children: [
+            for (final n in const [15, 30, 45, 60]) ...[
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => d.dustDays = n),
+                  child: Container(
+                    height: 44,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: d.dustDays == n ? const Color(0xFF0A84D8) : C.chip,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: d.dustDays == n ? const Color(0xFF0A84D8) : C.line),
+                    ),
+                    child: Text('${n}d', style: TextStyle(fontWeight: FontWeight.w800, color: d.dustDays == n ? Colors.white : C.text)),
+                  ),
+                ),
+              ),
+              if (n != 60) const SizedBox(width: 8),
+            ]
+          ]),
+        ),
+        SectionCard(
+          child: Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(t('cloud_alerts'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                Text(t('cloud_sub'), style: TextStyle(color: C.mute, fontSize: 12.5)),
+              ]),
             ),
-        ]),
-        _switchRow(t('cloud_alerts'), t('cloud_sub'), d.cloudAlerts, (v) => setState(() => d.cloudAlerts = v), icon: Icons.cloud_outlined),
-        const SizedBox(height: 22),
-        FilledButton.icon(
+            Switch(value: d.cloudAlerts, onChanged: (v) => setState(() => d.cloudAlerts = v)),
+          ]),
+        ),
+        Divider(color: C.line, height: 28),
+        OutlinedButton.icon(
           onPressed: _reset,
           icon: const Icon(Icons.restart_alt),
-          label: Text(t('reset_all')),
-          style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white, minimumSize: const Size.fromHeight(50)),
+          label: Text(t('reset_all'), style: const TextStyle(fontWeight: FontWeight.w800)),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: C.red,
+            side: BorderSide(color: C.red.withValues(alpha: .6)),
+            backgroundColor: C.red.withValues(alpha: .06),
+            minimumSize: const Size.fromHeight(52),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          ),
         ),
       ]);
 
@@ -312,46 +411,45 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
     final h = MediaQuery.of(context).size.height;
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 24),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: 560, maxHeight: h * .88),
+        constraints: BoxConstraints(maxWidth: 560, maxHeight: h * .9),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+            padding: const EdgeInsets.fromLTRB(20, 18, 16, 12),
             child: Row(children: [
-              Icon(Icons.settings_outlined, color: C.blue),
-              const SizedBox(width: 10),
-              Expanded(child: Text(t('settings'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
-              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(color: C.chipBlue, shape: BoxShape.circle),
+                child: Icon(Icons.settings_outlined, color: C.sky),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(t('app_settings'), style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+                  Text(t('settings_sub'), style: TextStyle(color: C.mute, fontSize: 13)),
+                ]),
+              ),
+              Material(
+                color: C.chip,
+                shape: const CircleBorder(),
+                child: InkWell(customBorder: const CircleBorder(), onTap: () => Navigator.pop(context), child: const SizedBox(width: 42, height: 42, child: Icon(Icons.close, size: 20))),
+              ),
             ]),
           ),
-          TabBar(
-            controller: tabs,
-            dividerColor: C.line,
-            labelColor: C.blue,
-            unselectedLabelColor: C.mute,
-            indicatorColor: C.blue,
-            labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-            tabs: [
-              Tab(text: t('tab_display')),
-              Tab(text: t('tab_tariffs')),
-              Tab(text: t('tab_alerts')),
-            ],
+          Divider(color: C.line, height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: PillTabs(controller: tabs, labels: [t('tab_display'), t('tab_tariffs'), t('tab_alerts')]),
           ),
           Flexible(
             child: SizedBox(
-              height: h * .6,
+              height: h * .56,
               child: TabBarView(controller: tabs, children: [_display(), _tariffs(), _alerts()]),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Row(children: [
-              Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: Text(t('cancel')))),
-              const SizedBox(width: 12),
-              Expanded(child: FilledButton(onPressed: _save, child: Text(t('save_settings')))),
-            ]),
-          ),
+          DialogFooter(cancel: t('cancel'), save: t('save_settings'), onCancel: () => Navigator.pop(context), onSave: _save),
         ]),
       ),
     );

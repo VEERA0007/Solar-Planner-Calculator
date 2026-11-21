@@ -11,6 +11,11 @@ import 'settings_dialog.dart';
 import 'sun_art.dart';
 import 'theme.dart';
 
+String fmtTrim(double v) {
+  final t = v.toStringAsFixed(2);
+  return t.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+}
+
 String _two(int n) => n.toString().padLeft(2, '0');
 String clock12(DateTime d, {bool seconds = false}) {
   final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
@@ -90,7 +95,7 @@ class _HomePageState extends State<HomePage> {
     final lang = s.lang;
     final t = s.t;
     final night = C.dark;
-    final progress = arcProgress(now, info.rise, info.set, night: night);
+    final progress = arcProgress(now, info.rise, info.set, night: false);
     final cloud = irr?.cloud ?? 0;
     final skyKey = cloud < 20 ? 'clear_sky' : (cloud < 60 ? 'partly_cloudy' : 'overcast');
     final due = s.cleanDueInDays;
@@ -143,7 +148,7 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(width: 6),
             _RoundBtn(night ? Icons.wb_sunny_outlined : Icons.nightlight_outlined, () => s.setDark(!night),
-                color: night ? C.sun : C.purple),
+                color: night ? C.sun : C.blue),
             const SizedBox(width: 8),
             _RoundBtn(Icons.settings_outlined, () => showSettingsDialog(context, s), color: C.blue),
             const SizedBox(width: 8),
@@ -167,6 +172,8 @@ class _HomePageState extends State<HomePage> {
                 _Dot(C.green, 8),
                 const SizedBox(width: 6),
                 Text(clock12(now, seconds: true), style: TextStyle(fontFamilyFallback: kMono, color: C.sky, fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(width: 6),
+                Text('LIVE', style: TextStyle(color: C.mute, fontSize: 10.5, fontWeight: FontWeight.w600)),
               ]),
             ),
           ]),
@@ -175,51 +182,49 @@ class _HomePageState extends State<HomePage> {
         // ---------- hourly auto-sync ----------
         Panel(
           radius: 22,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(color: C.chipGreen, shape: BoxShape.circle),
-              child: Icon(Icons.wifi_tethering, color: C.green, size: 22),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(t('hourly_sync'), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
-                Row(children: [
-                  Icon(Icons.schedule, size: 13, color: C.mute),
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      s.lastSync == null ? '--:--' : '${t('updated')}: ${_two(s.lastSync!.hour)}:${_two(s.lastSync!.minute)}',
-                      style: TextStyle(fontFamilyFallback: kMono, color: C.mute, fontSize: 12),
-                    ),
-                  ),
-                ]),
-              ]),
-            ),
-            Switch(
-              value: s.prefs.autoSync,
-              onChanged: (v) {
-                s.prefs.autoSync = v;
-                s.savePrefs();
-              },
-            ),
-            const SizedBox(width: 4),
-            FilledButton.icon(
-              onPressed: s.syncing
-                  ? null
-                  : () async {
-                      await s.sync();
-                      if (context.mounted) toast(context, '${t('updated')} ${clock12(DateTime.now())}');
-                    },
-              icon: s.syncing
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2.2))
-                  : const Icon(Icons.sync, size: 18),
-              label: Text(t('sync_now'), style: const TextStyle(fontWeight: FontWeight.w700)),
-              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11), visualDensity: VisualDensity.compact),
-            ),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              _Dot(C.green, 16),
+              const SizedBox(width: 8),
+              Icon(Icons.wifi_tethering, color: C.sky, size: 20),
+              const SizedBox(width: 6),
+              Text(t('hourly_sync'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+              const SizedBox(width: 10),
+              Icon(Icons.schedule, size: 15, color: C.mute),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  s.lastSync == null ? '--:--' : '${t('updated')}: ${_two(s.lastSync!.hour)}:${_two(s.lastSync!.minute)}',
+                  style: TextStyle(fontFamilyFallback: kMono, color: C.mute, fontSize: 12.5),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              Switch(
+                value: s.prefs.autoSync,
+                onChanged: (v) {
+                  s.prefs.autoSync = v;
+                  s.savePrefs();
+                },
+              ),
+              const SizedBox(width: 10),
+              FilledButton.icon(
+                onPressed: s.syncing
+                    ? null
+                    : () async {
+                        await s.sync();
+                        if (context.mounted) toast(context, '${t('updated')} ${clock12(DateTime.now())}');
+                      },
+                icon: s.syncing
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2.2))
+                    : const Icon(Icons.sync, size: 18),
+                label: Text(t('sync_now'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12)),
+              ),
+            ]),
           ]),
         ),
         const SizedBox(height: 12),
@@ -244,7 +249,11 @@ class _HomePageState extends State<HomePage> {
                       style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
                 ),
                 Divider(color: C.line, height: 20),
-                Text(t('sun_status'), style: TextStyle(color: C.mute, fontSize: 13)),
+                Row(children: [
+                  Icon(Icons.wb_sunny_outlined, size: 16, color: C.orange),
+                  const SizedBox(width: 5),
+                  Flexible(child: Text(t('sun_status'), style: TextStyle(color: C.mute, fontSize: 13))),
+                ]),
                 const SizedBox(height: 2),
                 Row(children: [
                   Flexible(
@@ -255,8 +264,14 @@ class _HomePageState extends State<HomePage> {
                   _Dot(pos.alt > 0 ? C.sun : C.mute, 11),
                 ]),
                 const SizedBox(height: 8),
-                Text('${fmt1(soFar * kCo2PerKwh)} ${t('co2_avoided')}',
-                    style: TextStyle(fontFamilyFallback: kMono, color: C.green, fontSize: 11.5)),
+                Row(children: [
+                  _Dot(C.green, 8),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text('${fmt1(soFar * kCo2PerKwh)} ${t('co2_avoided')}',
+                        style: TextStyle(fontFamilyFallback: kMono, color: C.green, fontSize: 11.5)),
+                  ),
+                ]),
               ]),
             ),
             const SizedBox(width: 10),
@@ -283,59 +298,71 @@ class _HomePageState extends State<HomePage> {
           ]),
         ),
         const SizedBox(height: 16),
-        // ---------- heading ----------
-        Text(t('energy_balance'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, height: 1.25)),
-        const SizedBox(height: 2),
-        Text(t('tap_metric'), style: TextStyle(color: C.mute, fontSize: 12.5)),
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(color: C.chip, borderRadius: BorderRadius.circular(18)),
-          child: Row(children: [
-            Icon(night ? Icons.nightlight_outlined : Icons.wb_cloudy_outlined, size: 18, color: C.mute),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(irr == null ? '…' : '${t(skyKey)}${cloud < 20 ? ' / Opt…' : ''}',
-                  style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+        // ---------- heading + sky chip ----------
+        Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+          Expanded(
+            flex: 11,
+            child: Text(t('energy_balance'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1.25)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 9,
+            child: Text(t('tap_metric'), style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.3)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 11,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              decoration: BoxDecoration(color: C.chip, borderRadius: BorderRadius.circular(16)),
+              child: Row(children: [
+                Icon(night ? Icons.nightlight_outlined : Icons.wb_cloudy_outlined, size: 18, color: C.orange),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(irr == null ? '…' : (cloud < 20 ? '${t(skyKey)} / Opt…' : t(skyKey)),
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5), maxLines: 2, overflow: TextOverflow.ellipsis),
+                ),
+                Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text((monthPsh ?? psh) > 0 ? (monthPsh ?? psh).toStringAsFixed(1) : '-',
+                      style: TextStyle(fontFamilyFallback: kMono, color: C.amber, fontSize: 15, fontWeight: FontWeight.w700)),
+                  Text('PSH', style: TextStyle(fontFamilyFallback: kMono, color: C.amber, fontSize: 10.5)),
+                ]),
+              ]),
             ),
-            Column(children: [
-              Text((monthPsh ?? psh) > 0 ? (monthPsh ?? psh).toStringAsFixed(1) : '-',
-                  style: TextStyle(fontFamilyFallback: kMono, color: C.amber, fontSize: 17, fontWeight: FontWeight.w700)),
-              Text('PSH', style: TextStyle(fontFamilyFallback: kMono, color: C.amber, fontSize: 11)),
-            ]),
-          ]),
-        ),
+          ),
+        ]),
         const SizedBox(height: 12),
         // ---------- 4 display-only metric cards ----------
         _pair(
           _Metric(
             icon: Icons.wb_sunny_outlined, iconBg: C.chipSun, iconColor: C.sun,
             name: t('potential_gain'),
-            value: potential < 100 ? potential.toStringAsFixed(1) : potential.round().toString(),
+            value: potential < 100 ? fmtTrim(potential) : potential.round().toString(),
             unit: 'kWh', unitColor: C.amber,
-            foot1: '${live.toStringAsFixed(2)} kW', foot2: '${(irr?.ghi ?? 0).round()} W/m²',
-            desc: '${site.kwp} kWp',
+            foot1: '${live.toStringAsFixed(2)} kW ${t('live_word')}', foot2: '${(irr?.ghi ?? 0).round()} W/m²',
+            desc: '${t('desc_yield')} ${site.kwp} ${t('desc_plant')}',
           ),
           _Metric(
             icon: Icons.monitor_heart_outlined, iconBg: C.chipBlue, iconColor: C.sky,
             name: t('actual_usage'), value: load.toStringAsFixed(1), unit: 'kWh', unitColor: C.sky,
-            foot1: '${act.kw.toStringAsFixed(2)} kW', foot2: '${s.appliances.length}', desc: t('load'),
+            foot1: '${act.kw.toStringAsFixed(2)} kW ${t('active_word')}', foot2: '${s.appliances.length} ${t('appliances_word')}',
+            desc: t('desc_load'),
           ),
         ),
         const SizedBox(height: 12),
         _pair(
           _Metric(
             icon: Icons.trending_down, iconBg: C.chipSun, iconColor: C.sun,
-            name: t('grid_deficit'),
+            name: net >= 0 ? t('grid_surplus') : t('grid_deficit'),
             value: '${net >= 0 ? '+' : '-'}${net.abs().toStringAsFixed(1)}', unit: 'kWh', unitColor: C.amber,
-            foot1: '$offset %', foot2: net >= 0 ? t('net_export') : t('net_import'), foot2Color: C.amber,
-            desc: s.discom.name,
+            foot1: '${t('offset_word')}: $offset%', foot2: net >= 0 ? t('self_sufficient') : t('grid_reliance'), foot2Color: C.amber,
+            desc: net >= 0 ? t('desc_surplus') : t('desc_deficit'),
           ),
           _Metric(
             icon: Icons.auto_awesome, iconBg: C.chipPurple, iconColor: C.purple,
-            name: t('financial_value'), value: '₹${groupIndian(used * s.unitPrice)}', unit: '', unitColor: C.green,
-            foot1: '${fmt1(potential * kCo2PerKwh)} kg CO₂', foot2: '₹${s.unitPrice.toStringAsFixed(2)}/kWh', foot2Color: C.green,
-            desc: s.tariffCat.label,
+            name: t('financial_value'), value: '₹${groupIndian(used * s.unitPrice)}', unit: t('saved_word'), unitColor: C.green,
+            foot1: '${fmt1(potential * kCo2PerKwh)} kg CO₂', foot2: t('clean_offset'), foot2Color: C.green,
+            desc: '@ ₹${fmtTrim(s.unitPrice)}/kWh ${t('tariff_word')}',
           ),
         ),
         const SizedBox(height: 14),
@@ -345,7 +372,7 @@ class _HomePageState extends State<HomePage> {
           child: Column(children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               Text.rich(TextSpan(children: [
-                TextSpan(text: '${t('solar_gen')}: '),
+                TextSpan(text: '${t('solar_label')}: '),
                 TextSpan(text: potential.toStringAsFixed(1), style: const TextStyle(fontFamilyFallback: kMono, fontWeight: FontWeight.w700)),
                 const TextSpan(text: ' kWh'),
               ]), style: const TextStyle(fontSize: 14)),
@@ -367,12 +394,6 @@ class _HomePageState extends State<HomePage> {
               Text('${net >= 0 ? '+' : '-'}${net.abs().toStringAsFixed(1)} kWh ${net >= 0 ? t('net_export') : t('net_import')}',
                   style: TextStyle(color: C.amber, fontWeight: FontWeight.w600, fontSize: 13)),
             ]),
-            const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text('${irr == null ? '-' : (irr.live ? 'LIVE' : 'MODEL')} · ${t('solar_pr')} ${(s.pr * 100).toStringAsFixed(1)}%',
-                  style: TextStyle(color: C.mute, fontSize: 11.5)),
-            ),
           ]),
         ),
         if (due != null && due <= 7) ...[
@@ -428,36 +449,25 @@ class _Avatar extends StatelessWidget {
   const _Avatar(this.name, this.onTap);
   @override
   Widget build(BuildContext context) {
-    final initial = name.trim().isEmpty ? null : name.trim()[0].toUpperCase();
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(
-        width: 46,
-        height: 48,
+        width: 50,
+        height: 50,
         child: Stack(clipBehavior: Clip.none, children: [
           Positioned(
-            top: 0,
-            left: 2,
+            left: 4,
+            top: 4,
             child: Container(
               width: 42,
               height: 42,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: const LinearGradient(colors: [Color(0xFFFB8A2E), Color(0xFFF5A524)]),
-                border: Border.all(color: C.line, width: 2),
-              ),
-              alignment: Alignment.center,
-              child: initial == null
-                  ? const Icon(Icons.person, color: Colors.white, size: 24)
-                  : Text(initial, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
+              decoration: BoxDecoration(shape: BoxShape.circle, color: C.card, border: Border.all(color: C.line)),
+              child: Icon(Icons.person, color: C.sky, size: 24),
             ),
           ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [for (var i = 0; i < 3; i++) Icon(Icons.star, size: 11, color: C.sun)]),
-          ),
+          Positioned(top: 0, right: 2, child: Icon(Icons.star, size: 11, color: C.blue)),
+          Positioned(bottom: 3, left: 0, child: Icon(Icons.star, size: 11, color: C.blue)),
+          Positioned(bottom: 1, right: 2, child: Icon(Icons.star, size: 11, color: C.blue)),
         ]),
       ),
     );
@@ -501,6 +511,7 @@ class _Metric extends StatelessWidget {
             child: Text(name, textAlign: TextAlign.right, maxLines: 2, overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: C.mute, fontWeight: FontWeight.w700, fontSize: 13)),
           ),
+          Padding(padding: const EdgeInsets.only(top: 1), child: Icon(Icons.chevron_right, size: 18, color: C.mute)),
         ]),
         const SizedBox(height: 12),
         FittedBox(

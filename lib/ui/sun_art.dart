@@ -140,7 +140,7 @@ class SunArtPainter extends CustomPainter {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: night
-                ? [const Color(0xFFBFD4FF).withValues(alpha: .28), const Color(0x00BFD4FF)]
+                ? [const Color(0xFFFFC46B).withValues(alpha: .30), const Color(0x00FFC46B)]
                 : [const Color(0xFFFFE08A).withValues(alpha: .55), const Color(0x00FFE08A)],
           ).createShader(Rect.fromPoints(pos, Offset(arrayCx, arrayTop))),
       );
@@ -196,39 +196,33 @@ class SunArtPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(w * .745, h * .75, w * .06, h * .02), Paint()..color = const Color(0xFF22C55E));
     canvas.drawRect(Rect.fromLTWH(w * .745, h * .79, w * .06, h * .008), Paint()..color = const Color(0xFFB4BFD3));
 
-    // ----- marker -----
+    // ----- marker: always the sun, at its real position -----
     if (night) {
-      // crescent moon
-      final c = pos;
-      final rad = w * .045;
-      final glow = Paint()
-        ..color = const Color(0xFFEFF4FF).withValues(alpha: .25)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
-      canvas.drawCircle(c, rad * 1.7, glow);
-      canvas.saveLayer(Rect.fromCircle(center: c, radius: rad * 2), Paint());
-      canvas.drawCircle(c, rad, Paint()..color = const Color(0xFFF4F7FF));
-      canvas.drawCircle(c + Offset(rad * .55, -rad * .2), rad * .92, Paint()..blendMode = BlendMode.clear);
+      // fixed crescent moon in the night sky
+      final mc = Offset(w * .40, h * .22);
+      final mr = w * .028;
+      canvas.drawCircle(mc, mr * 1.8, Paint()..color = const Color(0xFFEFF4FF).withValues(alpha: .22)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6));
+      canvas.saveLayer(Rect.fromCircle(center: mc, radius: mr * 2), Paint());
+      canvas.drawCircle(mc, mr, Paint()..color = const Color(0xFFF4F7FF));
+      canvas.drawCircle(mc + Offset(mr * .55, -mr * .2), mr * .92, Paint()..blendMode = BlendMode.clear);
       canvas.restore();
+    }
+    final c = pos;
+    final rad = w * .032;
+    if (!above) {
+      // sun below the horizon: dim disc parked at the end of the arc
+      canvas.drawCircle(c, rad, Paint()..color = const Color(0xFF5A3B2A).withValues(alpha: .85));
     } else {
-      final c = pos;
-      final rad = w * .04;
       canvas.drawCircle(
         c,
-        rad * 2.4,
+        rad * 2.6,
         Paint()
-          ..color = const Color(0xFFFFD54A).withValues(alpha: .45)
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+          ..color = const Color(0xFFFF9F1C).withValues(alpha: night ? .35 : .45)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9),
       );
-      final ray = Paint()
-        ..color = const Color(0xFFFFC107)
-        ..strokeWidth = 1.6
-        ..strokeCap = StrokeCap.round;
-      for (var i = 0; i < 12; i++) {
-        final a = i * math.pi / 6;
-        canvas.drawLine(c + Offset(math.cos(a), math.sin(a)) * rad * 1.35, c + Offset(math.cos(a), math.sin(a)) * rad * 1.8, ray);
-      }
-      canvas.drawCircle(c, rad, Paint()..color = const Color(0xFFFFB300));
-      canvas.drawCircle(c, rad * .72, Paint()..color = const Color(0xFFFFD54A));
+      canvas.drawCircle(c, rad, Paint()..color = const Color(0xFFFF8A00));
+      canvas.drawCircle(c, rad * .62, Paint()..color = Colors.white);
+      canvas.drawCircle(c, rad * .36, Paint()..color = const Color(0xFFFF8A00));
     }
     canvas.restore();
   }

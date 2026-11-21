@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/store.dart';
 import 'theme.dart';
+import 'widgets.dart';
 
 Future<void> showProfileDialog(BuildContext context, AppState s) =>
     showDialog<void>(context: context, builder: (_) => _ProfileDialog(state: s));
@@ -107,31 +108,30 @@ class _ProfileDialogState extends State<_ProfileDialog> with SingleTickerProvide
   }
 
   Widget _f(String label, String key,
-      {TextInputType? kb, String? err, IconData? icon, int lines = 1, bool readOnly = false, VoidCallback? onTap, Widget? suffix}) =>
-      Padding(
-        padding: const EdgeInsets.only(top: 14),
-        child: TextField(
+      {TextInputType? kb, String? err, IconData? icon, int lines = 1, bool readOnly = false, VoidCallback? onTap, Widget? suffix, bool mono = false}) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        FieldLabel(label, icon: icon),
+        TextField(
           controller: c[key],
           keyboardType: kb,
           maxLines: lines,
           readOnly: readOnly,
           onTap: onTap,
-          decoration: InputDecoration(
-            labelText: label,
-            errorText: err,
-            prefixIcon: icon == null ? null : Icon(icon, size: 20),
-            suffixIcon: suffix,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w600, fontFamilyFallback: mono ? kMono : null),
+          decoration: plainField(error: err, suffix: suffix),
         ),
-      );
+      ]);
 
-  Widget _owner() => ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), children: [
-        _f(t('full_name'), 'name', icon: Icons.person_outline),
-        _f(t('service_no'), 'no', icon: Icons.tag, kb: TextInputType.number),
-        _f(t('mobile'), 'mobile', icon: Icons.phone_outlined, kb: TextInputType.phone, err: errMobile),
-        _f(t('pin'), 'pin', icon: Icons.pin_drop_outlined, kb: TextInputType.number, err: errPin),
-        _f(t('email'), 'email', icon: Icons.mail_outline, kb: TextInputType.emailAddress, err: errEmail),
-        _f(t('address'), 'addr', icon: Icons.home_outlined, lines: 3),
+  Widget _owner() => ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), children: [
+        _f(t('full_name'), 'name'),
+        _f(t('service_no'), 'no', kb: TextInputType.text, mono: true),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(child: _f(t('mobile'), 'mobile', icon: Icons.phone_outlined, kb: TextInputType.phone, err: errMobile)),
+          const SizedBox(width: 12),
+          Expanded(child: _f(t('pin'), 'pin', icon: Icons.location_on_outlined, kb: TextInputType.number, err: errPin)),
+        ]),
+        _f(t('email_addr'), 'email', icon: Icons.mail_outline, kb: TextInputType.emailAddress, err: errEmail),
+        _f(t('address'), 'addr', lines: 3),
       ]);
 
   Widget _specs() {
@@ -139,43 +139,43 @@ class _ProfileDialogState extends State<_ProfileDialog> with SingleTickerProvide
     final sq = double.tryParse(c['roof']!.text) ?? 0;
     final fit = sq / 100; // ~100 sq ft per kWp
     final war = int.tryParse(c['war']!.text) ?? 25;
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), children: [
-      Row(children: [
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), children: [
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(child: _f(t('capacity'), 'kwp', kb: const TextInputType.numberWithOptions(decimal: true))),
-        const SizedBox(width: 10),
+        const SizedBox(width: 12),
         Expanded(child: _f(t('roof_area'), 'roof', kb: TextInputType.number)),
       ]),
-      Padding(
-        padding: const EdgeInsets.only(top: 14),
-        child: DropdownButtonFormField<String>(
-          initialValue: roof,
-          isExpanded: true,
-          decoration: InputDecoration(labelText: t('roof_type')),
-          items: [for (final k in _roofKeys) DropdownMenuItem(value: k, child: Text(t('roof_$k'), overflow: TextOverflow.ellipsis))],
-          onChanged: (v) => setState(() => roof = v ?? roof),
+      FieldLabel(t('roof_type')),
+      DropdownButtonFormField<String>(
+        initialValue: roof,
+        isExpanded: true,
+        icon: Icon(Icons.keyboard_arrow_down, color: C.mute),
+        decoration: plainField(),
+        style: TextStyle(color: C.text, fontWeight: FontWeight.w600, fontSize: 15.5),
+        items: [for (final k in _roofKeys) DropdownMenuItem(value: k, child: Text(t('roof_$k'), overflow: TextOverflow.ellipsis))],
+        onChanged: (v) => setState(() => roof = v ?? roof),
+      ),
+      _f(t('panel'), 'panel'),
+      _f(t('inverter'), 'inv'),
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child: _f(t('commission'), 'date', readOnly: true, onTap: _pickDate, suffix: Icon(Icons.keyboard_arrow_down, color: C.mute)),
         ),
-      ),
-      _f(t('panel'), 'panel', icon: Icons.solar_power_outlined),
-      _f(t('inverter'), 'inv', icon: Icons.electrical_services),
-      _f(t('commission'), 'date', readOnly: true, onTap: _pickDate, icon: Icons.event_outlined),
-      _f(t('warranty'), 'war', kb: TextInputType.number),
-      const SizedBox(height: 14),
-      Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(
-            sq > 0 ? 'Roof fits about ${fit.toStringAsFixed(1)} kWp · plant ${kw.toStringAsFixed(2)} kWp ${kw <= fit ? '(fits)' : '(too large for the roof)'}' : '-',
-            style: TextStyle(color: kw <= fit || sq <= 0 ? C.green : C.red, fontSize: 12.5, fontWeight: FontWeight.w600),
+        const SizedBox(width: 12),
+        Expanded(child: _f(t('warranty'), 'war', kb: TextInputType.number)),
+      ]),
+      if (sq > 0 || s.profile.commissionDate != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 14),
+          child: Text(
+            [
+              if (sq > 0) '${t('owner_hint')} ${fit.toStringAsFixed(1)} kWp · ${kw.toStringAsFixed(2)} kWp ${kw <= fit ? '(OK)' : '(!)'}',
+              if (s.profile.commissionDate != null)
+                '${t('warranty')}: ${fmtDate(DateTime(s.profile.commissionDate!.year + war, s.profile.commissionDate!.month, s.profile.commissionDate!.day))}',
+            ].join('\n'),
+            style: TextStyle(color: kw <= fit || sq <= 0 ? C.green : C.red, fontSize: 12),
           ),
-          if (s.profile.commissionDate != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text('${t('warranty')}: ${fmtDate(DateTime(s.profile.commissionDate!.year + war, s.profile.commissionDate!.month, s.profile.commissionDate!.day))}',
-                  style: TextStyle(color: C.mute, fontSize: 12)),
-            ),
-        ]),
-      ),
+        ),
     ]);
   }
 
@@ -185,52 +185,60 @@ class _ProfileDialogState extends State<_ProfileDialog> with SingleTickerProvide
     final name = c['name']!.text.trim();
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 24),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: 560, maxHeight: h * .9),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 8, 8),
+            padding: const EdgeInsets.fromLTRB(20, 18, 16, 12),
             child: Row(children: [
-              Container(
-                width: 52,
-                height: 52,
-                alignment: Alignment.center,
-                decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFFFB8A2E), Color(0xFFF5A524)])),
-                child: name.isEmpty
-                    ? const Icon(Icons.person, color: Colors.white, size: 28)
-                    : Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800)),
+              SizedBox(
+                width: 58,
+                height: 58,
+                child: Stack(clipBehavior: Clip.none, children: [
+                  Positioned(
+                    left: 3,
+                    top: 3,
+                    child: Container(
+                      width: 52,
+                      height: 52,
+                      decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF3B82F6), Color(0xFF2563EB)])),
+                      child: const Icon(Icons.person_outline, color: Colors.white, size: 28),
+                    ),
+                  ),
+                  Positioned(top: 0, right: 4, child: Icon(Icons.star, size: 12, color: C.sky)),
+                  Positioned(bottom: 4, left: 0, child: Icon(Icons.star, size: 12, color: C.sky)),
+                  Positioned(bottom: 2, right: 4, child: Icon(Icons.star, size: 12, color: C.sky)),
+                ]),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(name.isEmpty ? t('profile') : name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800), overflow: TextOverflow.ellipsis),
-                  Row(children: [for (var i = 0; i < 3; i++) Icon(Icons.star, size: 13, color: C.sun), const SizedBox(width: 6), Flexible(child: Text(t('pro_tier'), overflow: TextOverflow.ellipsis, style: TextStyle(color: C.amber, fontSize: 12, fontWeight: FontWeight.w600)))]),
+                  Text(name.isEmpty ? t('profile') : name, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800), overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Row(children: [
+                    for (var i = 0; i < 3; i++) const Icon(Icons.star, size: 14, color: Color(0xFFF59E0B)),
+                    const SizedBox(width: 6),
+                    Flexible(child: Text(t('pro_tier'), overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 13, fontWeight: FontWeight.w700))),
+                  ]),
                 ]),
               ),
-              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+              Material(
+                color: C.chip,
+                shape: const CircleBorder(),
+                child: InkWell(customBorder: const CircleBorder(), onTap: () => Navigator.pop(context), child: const SizedBox(width: 42, height: 42, child: Icon(Icons.close, size: 20))),
+              ),
             ]),
           ),
-          TabBar(
-            controller: tabs,
-            dividerColor: C.line,
-            labelColor: C.blue,
-            unselectedLabelColor: C.mute,
-            indicatorColor: C.blue,
-            labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-            tabs: [Tab(text: t('tab_owner')), Tab(text: t('tab_specs'))],
+          Divider(color: C.line, height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: PillTabs(controller: tabs, labels: [t('tab_owner'), t('tab_specs')]),
           ),
           Flexible(
-            child: SizedBox(height: h * .55, child: TabBarView(controller: tabs, children: [_owner(), _specs()])),
+            child: SizedBox(height: h * .52, child: TabBarView(controller: tabs, children: [_owner(), _specs()])),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Row(children: [
-              Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: Text(t('cancel')))),
-              const SizedBox(width: 12),
-              Expanded(child: FilledButton(onPressed: _save, child: Text(t('save_profile')))),
-            ]),
-          ),
+          DialogFooter(cancel: t('cancel'), save: t('save_profile'), onCancel: () => Navigator.pop(context), onSave: _save),
         ]),
       ),
     );

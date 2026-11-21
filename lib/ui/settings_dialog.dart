@@ -94,7 +94,7 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
         isExpanded: true,
         icon: Icon(Icons.keyboard_arrow_down, color: C.mute),
         decoration: plainField(),
-        style: TextStyle(color: C.text, fontWeight: FontWeight.w700, fontSize: 15.5),
+        style: Theme.of(context).textTheme.bodyLarge!.copyWith(color: C.text, fontWeight: FontWeight.w700, fontSize: 15.5),
         items: items,
         onChanged: onChanged,
       );

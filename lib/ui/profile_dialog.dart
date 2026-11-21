@@ -151,7 +151,7 @@ class _ProfileDialogState extends State<_ProfileDialog> with SingleTickerProvide
         isExpanded: true,
         icon: Icon(Icons.keyboard_arrow_down, color: C.mute),
         decoration: plainField(),
-        style: TextStyle(color: C.text, fontWeight: FontWeight.w600, fontSize: 15.5),
+        style: Theme.of(context).textTheme.bodyLarge!.copyWith(color: C.text, fontWeight: FontWeight.w600, fontSize: 15.5),
         items: [for (final k in _roofKeys) DropdownMenuItem(value: k, child: Text(t('roof_$k'), overflow: TextOverflow.ellipsis))],
         onChanged: (v) => setState(() => roof = v ?? roof),
       ),

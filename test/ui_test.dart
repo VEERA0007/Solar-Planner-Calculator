@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -9,7 +10,9 @@ import 'package:calculator/ui/service_level.dart';
 import 'package:calculator/ui/service_space.dart';
 import 'package:calculator/main.dart' show Shell;
 import 'package:calculator/ui/sun_scene.dart';
+import 'package:calculator/core/update.dart';
 import 'package:calculator/ui/theme.dart';
+import 'package:calculator/ui/update_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -237,6 +240,58 @@ void main() {
     expect(bomOff.items.length > bomOn.items.length, isTrue);
     expect(rupee(386100), '₹386,100');
   });
+
+  for (final dark in [false, true]) {
+    testWidgets('update dialog ${dark ? 'night' : 'day'} downloads and installs', (t) async {
+      t.view.physicalSize = const Size(412, 900);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      final pending = Completer<String?>();
+      var installed = '';
+      const info = UpdateInfo(137, 'Solar Planner 0.0.7 (build 137)', 'https://example.com/a.apk', 'https://example.com', size: 95200000);
+      await t.pumpWidget(RepaintBoundary(
+        key: shotKey,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(dark),
+          home: Scaffold(
+            body: Center(
+              child: UpdateDialog(
+                info: info,
+                currentLabel: 'v0.0.7 · 136',
+                canDownload: true,
+                downloader: (url, size, onProgress, cancel) {
+                  onProgress(48400000, 95200000);
+                  return pending.future;
+                },
+                installer: (p) async {
+                  installed = p;
+                  return 'The installer is open. Tap Install to finish updating.';
+                },
+              ),
+            ),
+          ),
+        ),
+      ));
+      await t.pump();
+      expect(find.text('Update Available'), findsOneWidget);
+      expect(find.text('v0.0.7 · 137'), findsOneWidget);
+      await _shot(t, 'update-ready-${dark ? 'night' : 'day'}');
+      await t.tap(find.text('Update now'));
+      await t.pump(const Duration(milliseconds: 400));
+      expect(find.text('Downloading...'), findsOneWidget);
+      expect(find.text('51%'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+      await _shot(t, 'update-downloading-${dark ? 'night' : 'day'}');
+      pending.complete('/tmp/a.apk');
+      await t.pump(const Duration(milliseconds: 400));
+      expect(find.text('Download complete'), findsOneWidget);
+      expect(installed, '/tmp/a.apk');
+      await _shot(t, 'update-done-${dark ? 'night' : 'day'}');
+      expect(t.takeException(), isNull);
+      await t.pumpWidget(const SizedBox());
+    });
+  }
 
   test('critical load, surge, limits, BOM total and history signature', () {
     const items = [

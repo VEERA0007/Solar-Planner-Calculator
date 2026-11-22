@@ -17,6 +17,7 @@ s = open(p, encoding='utf-8').read()
 s = re.sub(r'android:label="[^"]*"', 'android:label="Solar Planner"', s, count=1)
 extra = '''
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <queries>

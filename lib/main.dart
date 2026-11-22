@@ -7,6 +7,7 @@ import 'ui/appliance_page.dart';
 import 'ui/estimator_page.dart';
 import 'ui/home_page.dart';
 import 'ui/sun_scene.dart';
+import 'ui/update_dialog.dart';
 import 'ui/service_page.dart';
 import 'ui/solar_page.dart';
 import 'ui/theme.dart';
@@ -23,7 +24,9 @@ class SolarApp extends StatefulWidget {
   State<SolarApp> createState() => _SolarAppState();
 }
 
-class _SolarAppState extends State<SolarApp> {
+class _SolarAppState extends State<SolarApp> with WidgetsBindingObserver {
+  bool _updateOpen = false;
+  DateTime _lastCheck = DateTime.fromMillisecondsSinceEpoch(0);
   final AppState state = AppState();
   Timer? _clock;
   final GlobalKey<NavigatorState> navKey = GlobalKey<NavigatorState>();
@@ -31,6 +34,7 @@ class _SolarAppState extends State<SolarApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     state.load().then((_) async {
       _autoUpdateCheck();
       await state.sync();
@@ -43,31 +47,25 @@ class _SolarAppState extends State<SolarApp> {
   }
 
   Future<void> _autoUpdateCheck() async {
+    if (_updateOpen) return;
+    _lastCheck = DateTime.now();
     final res = await checkForUpdate();
     final u = res.update;
     final ctx = navKey.currentContext;
-    if (u == null || ctx == null || !ctx.mounted) return;
-    showDialog<void>(
-      context: ctx,
-      builder: (c) => AlertDialog(
-        title: const Text('New version available'),
-        content: Text('${u.versionName} is ready.\nYou have ${res.currentVersion}.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Later')),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(c);
-              openUpdate(u);
-            },
-            child: const Text('Update now'),
-          ),
-        ],
-      ),
-    );
+    if (u == null || ctx == null || !ctx.mounted || _updateOpen) return;
+    _updateOpen = true;
+    await showUpdateDialog(ctx, u, res.currentLabel);
+    _updateOpen = false;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState st) {
+    if (st == AppLifecycleState.resumed && DateTime.now().difference(_lastCheck) > const Duration(minutes: 20)) _autoUpdateCheck();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _clock?.cancel();
     state.dispose();
     super.dispose();

@@ -3,6 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../core/i18n.dart';
 import '../core/store.dart';
 import '../core/update.dart';
+import 'update_dialog.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -22,6 +23,7 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
   late final TextEditingController company, phone, note;
   String version = '', updateMsg = '';
   UpdateInfo? pending;
+  String currentLabel = '';
   bool checking = false;
 
   AppState get s => widget.state;
@@ -79,6 +81,7 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
     setState(() {
       checking = false;
       pending = r.update;
+      currentLabel = r.currentLabel;
       updateMsg = r.message;
     });
   }
@@ -226,7 +229,7 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
             const SizedBox(height: 8),
             Wrap(spacing: 10, runSpacing: 8, children: [
               OutlinedButton(onPressed: checking ? null : _check, child: Text(checking ? '…' : 'Check for updates')),
-              if (pending != null) FilledButton(onPressed: () => openUpdate(pending!), child: const Text('Download update')),
+              if (pending != null) FilledButton(onPressed: () => showUpdateDialog(context, pending!, currentLabel), child: const Text('Update now')),
             ]),
             if (updateMsg.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(updateMsg, style: TextStyle(color: C.mute, fontSize: 12.5))),
             const SizedBox(height: 10),

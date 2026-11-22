@@ -27,4 +27,5 @@ flutter:
   assets:
     - data/tariffs.json
     - assets/scene/day.jpg
+    - assets/scene/dusk.jpg
     - assets/scene/night.jpg

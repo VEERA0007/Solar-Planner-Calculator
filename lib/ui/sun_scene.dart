@@ -120,12 +120,12 @@ class SunScenePainter extends CustomPainter {
 
   /// High-resolution rendered scenery (assets/scene). When loaded it replaces
   /// the vector fallback scene.
-  static ui.Image? dayImg, nightImg;
+  static ui.Image? dayImg, duskImg, nightImg;
   static Future<void> preload() async {
     Future<ui.Image?> load(String path) async {
       try {
         final data = await rootBundle.load(path);
-        final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+        final codec = await ui.instantiateImageCodec(data.buffer.asUint8List(), targetWidth: 3200);
         return (await codec.getNextFrame()).image;
       } catch (_) {
         return null;
@@ -133,6 +133,7 @@ class SunScenePainter extends CustomPainter {
     }
 
     dayImg ??= await load('assets/scene/day.jpg');
+    duskImg ??= await load('assets/scene/dusk.jpg');
     nightImg ??= await load('assets/scene/night.jpg');
   }
 
@@ -160,6 +161,11 @@ class SunScenePainter extends CustomPainter {
       final k = math.max(w / iw, h / ih);
       final src = Rect.fromCenter(center: Offset(iw / 2, ih / 2), width: w / k, height: h / k);
       canvas.drawImageRect(photo, src, full, Paint()..filterQuality = FilterQuality.high);
+      final warm = duskImg;
+      if (!night && warm != null && dusk > .02) {
+        // blend the golden-hour picture in as the sun nears the horizon
+        canvas.drawImageRect(warm, src, full, Paint()..filterQuality = FilterQuality.high..color = Color.fromRGBO(0, 0, 0, dusk.clamp(0.0, 1.0)));
+      }
       night ? _nightPhoto(canvas, size, P, height) : _dayPhoto(canvas, size, P, sun, dusk);
     } else {
       night ? _night(canvas, size, P, sun, height) : _day(canvas, size, P, sun, dusk);
@@ -623,7 +629,7 @@ class SunScenePainter extends CustomPainter {
   void _dayPhoto(Canvas canvas, Size size, Offset Function(double, double) P, Offset sun, double dusk) {
     final w = size.width, h = size.height;
     final full = Offset.zero & size;
-    if (dusk > .01) {
+    if (dusk > .01 && duskImg == null) {
       canvas.drawRect(
         full,
         Paint()

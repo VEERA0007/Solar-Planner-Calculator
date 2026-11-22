@@ -107,7 +107,9 @@ def module_tex(night, rng, mw=720, mh=430):
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
 
 
-def render(night, seed=7):
+def render(mode, seed=7):
+    night = mode == 'night'
+    dusk = mode == 'dusk'
     rng = np.random.default_rng(seed)
     random.seed(seed)
     P = dict(
@@ -116,6 +118,13 @@ def render(night, seed=7):
         g_far=hexc('#9fd070'), g_mid=hexc('#6fb844'), g_near=hexc('#4f9a33'),
         blade=[hexc('#3e7d28'), hexc('#5aa238'), hexc('#8cc85a'), hexc('#2f6a22')],
         haze=(225, 238, 252), light=1.0)
+    if dusk:
+        P.update(
+            sky=[(0, hexc('#2c3f8c')), (.40, hexc('#7d6fb0')), (.68, hexc('#f19a62')), (1, hexc('#ffd9a8'))],
+            m1=hexc('#b5a0c4'), m2=hexc('#8c7fae'), m3=hexc('#6d7f78'),
+            g_far=hexc('#a8b866'), g_mid=hexc('#7fa443'), g_near=hexc('#5a8530'),
+            blade=[hexc('#476f26'), hexc('#6f9a36'), hexc('#a9bf5c'), hexc('#3b5f20')],
+            haze=(255, 196, 140), light=.8)
     if night:
         P.update(
             sky=[(0, hexc('#030918')), (.55, hexc('#0b1c44')), (1, hexc('#1a3566'))],
@@ -351,18 +360,20 @@ def render(night, seed=7):
     yy, xx = np.mgrid[0:SH, 0:SW].astype(np.float32)
     vig = 1 - .22 * (((xx / SW - .6) ** 2) * 1.6 + ((yy / SH - .5) ** 2) * 1.2)
     a = a * vig[..., None]
-    if not night:   # warm sunlight tint on the right, cool shade on the left
+    if dusk:
+        a *= np.array([1.07, .93, .80], np.float32)
+    if not night and not dusk:   # warm sunlight tint on the right, cool shade on the left
         a *= (1 + (xx / SW - .5)[..., None] * np.array([.05, .03, -.04]))
     a += np.random.default_rng(seed).normal(0, 2.0, a.shape)
-    out = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)).resize((W, H), Image.LANCZOS)
-    return out.filter(ImageFilter.UnsharpMask(1.2, 60, 2))
+    out = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8))   # full 4600 x 2000 output
+    return out.filter(ImageFilter.UnsharpMask(1.6, 70, 2))
 
 
 if __name__ == '__main__':
     import os
     out = os.path.join(os.path.dirname(__file__), '..', 'assets', 'scene')
     os.makedirs(out, exist_ok=True)
-    for night in (False, True):
-        im = render(night)
-        im.save(os.path.join(out, 'night.jpg' if night else 'day.jpg'), quality=90, optimize=True, subsampling=0)
-        print('wrote', 'night' if night else 'day', im.size)
+    for mode in ('day', 'dusk', 'night'):
+        im = render(mode)
+        im.save(os.path.join(out, mode + '.jpg'), quality=88, optimize=True, subsampling=0)
+        print('wrote', mode, im.size)

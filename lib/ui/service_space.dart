@@ -337,17 +337,17 @@ class _SpaceTabState extends State<SpaceTab> {
         ]),
       ),
       const SizedBox(height: 12),
-      Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Expanded(child: _tile('Solar Irradiance (GHI)', '${ghi.round()} W/m²', C.amber, mono: true)),
         const SizedBox(width: 10),
         Expanded(child: _tile('UV Radiation Index', wthr == null ? '–' : wthr.uv.toStringAsFixed(1), C.purple, mono: true)),
-      ]),
+      ])),
       const SizedBox(height: 10),
-      Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Expanded(child: _tile('Sunrise / Sunset', '${hm(info.rise)} - ${hm(info.set)}', C.text)),
         const SizedBox(width: 10),
         Expanded(child: _tile('Weather Status', cloud < 20 ? 'Clear sky / Optimal Sun' : (cloud < 60 ? 'Partly cloudy' : 'Overcast'), cloud < 60 ? C.green : C.mute)),
-      ]),
+      ])),
     ];
   }
 

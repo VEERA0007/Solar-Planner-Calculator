@@ -126,13 +126,13 @@ class _TiltTabState extends State<TiltTab> {
         ]),
       ),
       const SizedBox(height: 12),
-      Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Expanded(child: _season('Summer Tilt', t.summer, north ? 'Flatter angle (May - Jul)' : 'Flatter angle (Nov - Jan)', C.amber)),
         const SizedBox(width: 10),
         Expanded(child: _season('Equinox Tilt', t.equinox, 'Mar & Sep Equinox', C.green)),
         const SizedBox(width: 10),
         Expanded(child: _season('Winter Tilt', t.winter, north ? 'Steeper angle (Nov - Jan)' : 'Steeper angle (May - Jul)', C.blue)),
-      ]),
+      ])),
       const SizedBox(height: 12),
       Panel(
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),

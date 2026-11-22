@@ -56,7 +56,6 @@ class _MaintenanceTabState extends State<MaintenanceTab> {
     final p = s.profile;
     final all = s.services;
     final shown = filter == null ? all : all.where((e) => e.type == filter).toList();
-    int count(ServiceType t) => all.where((e) => e.type == t).length;
     final comm = p.commissionDate;
     final ends = p.warrantyEnds;
     final yearsLeft = ends == null ? null : (ends.difference(DateTime.now()).inDays / 365).floor().clamp(0, p.warranty);
@@ -91,7 +90,7 @@ class _MaintenanceTabState extends State<MaintenanceTab> {
             ),
           ]),
           const SizedBox(height: 12),
-          Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(
               child: _MiniCard(
                 title: 'Installed Plant Capacity',
@@ -108,7 +107,7 @@ class _MaintenanceTabState extends State<MaintenanceTab> {
                 captionColor: C.green,
               ),
             ),
-          ]),
+          ])),
           const SizedBox(height: 12),
           Divider(color: C.line, height: 1),
           InkWell(

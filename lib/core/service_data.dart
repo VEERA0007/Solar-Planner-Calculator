@@ -67,7 +67,6 @@ String isoDate(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-$
 /// Solar-noon altitude on the solstices and equinox (degrees), folded to 0-90.
 ({double summer, double equinox, double winter}) noonAltitudes(double lat) {
   double fold(double v) => v > 90 ? 180 - v : v;
-  final north = lat >= 0;
   final l = lat.abs();
   // Summer solstice for the hemisphere the site is in.
   return (summer: fold(90 - l + 23.44), equinox: 90 - l, winter: fold(90 - l - 23.44).abs());

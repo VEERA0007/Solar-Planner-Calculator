@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:calculator/core/appliance_data.dart';
+import 'package:calculator/ui/appliance_page.dart';
 import 'package:calculator/core/service_data.dart';
 import 'package:calculator/core/store.dart';
 import 'package:calculator/ui/service_level.dart';
@@ -198,7 +199,7 @@ void main() {
       expect(t.takeException(), isNull);
       await _shot(t, 'appl-ongrid-$n');
       expect(s.appl.sys, SysType.onGrid);
-      await t.drag(find.byType(ListView).first, const Offset(0, -4000));
+      await t.drag(find.descendant(of: find.byType(AppliancePage), matching: find.byType(ListView)).first, const Offset(0, -4000));
       await t.pump(const Duration(milliseconds: 500));
       await _shot(t, 'appl-bom-$n');
       await t.tap(find.textContaining('in Estimator'));

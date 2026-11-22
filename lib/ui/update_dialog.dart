@@ -123,15 +123,15 @@ class _UpdateDialogState extends State<UpdateDialog> with SingleTickerProviderSt
     final newBg = dark ? const Color(0xFF0B4A52) : const Color(0xFFB8EDEF);
     final pct = total > 0 ? (got / total).clamp(0.0, 1.0) : 0.0;
 
-    Widget chip(String head, String v, Color bgc, Color tc) => Column(children: [
+    Widget chip(String head, String v, Color bgc, Color tc) => Flexible(child: Column(children: [
           Text(head, style: TextStyle(color: mute, fontSize: 15)),
           const SizedBox(height: 8),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(color: bgc, borderRadius: BorderRadius.circular(22)),
-            child: Text(v, style: TextStyle(color: tc, fontSize: 19, fontWeight: FontWeight.w800)),
+            child: FittedBox(fit: BoxFit.scaleDown, child: Text(v, maxLines: 1, style: TextStyle(color: tc, fontSize: 18, fontWeight: FontWeight.w800))),
           ),
-        ]);
+        ]));
 
     Widget outlined(String t, VoidCallback f) => OutlinedButton(
           onPressed: f,
@@ -173,7 +173,7 @@ class _UpdateDialogState extends State<UpdateDialog> with SingleTickerProviderSt
             Center(
               child: Row(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [
                 chip('Current', widget.currentLabel.isEmpty ? '-' : widget.currentLabel, chipBg, mute),
-                Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 14), child: Icon(Icons.arrow_forward, color: cyanText, size: 28)),
+                Padding(padding: const EdgeInsets.fromLTRB(10, 0, 10, 14), child: Icon(Icons.arrow_forward, color: cyanText, size: 26)),
                 chip('New', widget.info.label, newBg, cyanText),
               ]),
             ),

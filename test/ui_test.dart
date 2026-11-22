@@ -126,14 +126,14 @@ void main() {
       expect(t.takeException(), isNull);
       final n = dark ? 'night' : 'day';
       await _shot(t, 'service-maint-$n');
-      await t.drag(find.byType(ListView).last, const Offset(0, -600));
-      await t.pump(const Duration(milliseconds: 500));
-      await _shot(t, 'service-maint2-$n');
       await t.tap(find.text('+ Log Wash'));
       await t.pumpAndSettle();
       await _shot(t, 'service-log-$n');
       await t.tap(find.text('Cancel'));
       await t.pumpAndSettle();
+      await t.drag(find.byType(ListView).last, const Offset(0, -600));
+      await t.pump(const Duration(milliseconds: 500));
+      await _shot(t, 'service-maint2-$n');
       await t.tap(find.text('Tilt & Angles'));
       await t.pump(const Duration(seconds: 1));
       await _shot(t, 'service-tilt-curve-$n');

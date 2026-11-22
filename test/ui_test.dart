@@ -198,6 +198,9 @@ void main() {
       expect(t.takeException(), isNull);
       await _shot(t, 'appl-ongrid-$n');
       expect(s.appl.sys, SysType.onGrid);
+      await t.drag(find.byType(ListView).first, const Offset(0, -4000));
+      await t.pump(const Duration(milliseconds: 500));
+      await _shot(t, 'appl-bom-$n');
       await t.tap(find.textContaining('in Estimator'));
       await t.pump(const Duration(seconds: 1));
       expect(s.tab, 1);

@@ -191,7 +191,7 @@ void main() {
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);
       await _shot(t, 'appl-offgrid-$n');
-      await t.tap(find.text('On-Grid System'));
+      await t.tapAt(t.getTopLeft(find.text('On-Grid System')) - const Offset(8, 8));
       await t.pump(const Duration(milliseconds: 500));
       expect(t.takeException(), isNull);
       await _shot(t, 'appl-ongrid-$n');

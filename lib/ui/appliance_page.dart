@@ -129,17 +129,17 @@ class _AppliancePageState extends State<AppliancePage> {
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
         child: Row(children: [
-          IconButton(onPressed: () => s.setTab(0), icon: const Icon(Icons.arrow_back), tooltip: 'Home'),
+          IconButton(onPressed: () => s.setTab(0), icon: const Icon(Icons.arrow_back), tooltip: 'Home', visualDensity: VisualDensity.compact),
           const SizedBox(width: 2),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Appliance Load Analysis', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+              const FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text('Appliance Load Analysis', maxLines: 1, style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800))),
               Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 12.5)),
             ]),
           ),
-          IconButton(onPressed: () => s.setDark(!dark), icon: Icon(dark ? Icons.wb_sunny_outlined : Icons.nightlight_outlined, color: dark ? C.sun : C.mute)),
+          IconButton(onPressed: () => s.setDark(!dark), visualDensity: VisualDensity.compact, icon: Icon(dark ? Icons.wb_sunny_outlined : Icons.nightlight_outlined, color: dark ? C.sun : C.mute)),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
             decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(18), border: Border.all(color: C.line)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(Icons.wb_cloudy_outlined, size: 18, color: C.orange),
@@ -147,13 +147,13 @@ class _AppliancePageState extends State<AppliancePage> {
               Text(psh == null ? '–' : '${psh.toStringAsFixed(1)}h', style: TextStyle(fontWeight: FontWeight.w800, color: C.sky)),
             ]),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           InkWell(
             onTap: () => _edit(Appliance(id: DateTime.now().microsecondsSinceEpoch.toString(), name: 'New appliance', watts: 100, qty: 1, hours: 4, start: 18), isNew: true),
             borderRadius: BorderRadius.circular(22),
             child: Container(
-              width: 44,
-              height: 44,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(color: C.green, shape: BoxShape.circle),
               child: const Icon(Icons.add, color: Colors.white),
             ),

@@ -192,6 +192,15 @@ void main() {
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);
       await _shot(t, 'appl-offgrid-$n');
+      expect(s.applHistory.length, 1);
+      await t.tap(find.byKey(const ValueKey('history-btn')));
+      await t.pump(const Duration(seconds: 1));
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      expect(find.textContaining('Calculation History'), findsOneWidget);
+      await _shot(t, 'appl-history-$n');
+      await t.pageBack();
+      await t.pump(const Duration(seconds: 1));
       await t.tap(find.text('Hybrid System'), warnIfMissed: false); // first tap also drops the field focus
       await t.pump(const Duration(milliseconds: 300));
       await t.tap(find.text('On-Grid System'), warnIfMissed: false);
@@ -227,6 +236,38 @@ void main() {
     expect(bomOff.removed.length, 1);
     expect(bomOff.items.length > bomOn.items.length, isTrue);
     expect(rupee(386100), '₹386,100');
+  });
+
+  test('critical load, surge, limits, BOM total and history signature', () {
+    const items = [
+      LoadItem('LED Bulb', 10, 10, 6, 18),
+      LoadItem('Ceiling Fan', 75, 4, 10, 18, backup: true),
+      LoadItem('Split AC 1.5 Ton', 1500, 1, 8, 20),
+    ];
+    final st = analyzeLoad(items, 1.0);
+    expect(st.hourly.length, 24);
+    expect(st.criticalKw, closeTo(0.3, 1e-9));
+    expect(st.surgeKw, greaterThan(st.connectedKw));
+    expect(st.dayShare, inInclusiveRange(0, 1));
+    expect(st.dailyKwh, closeTo(items.fold(0.0, (a, e) => a + e.kwhDay), 1e-6));
+    final cfg = ApplCfg(sys: SysType.hybrid, backupHours: '4', sanctionedKw: 1, roofSqft: 100);
+    final an = analyze(items: items, cfg: cfg, rates: const Rates(), yieldPerKwp: 3.5, tariff: 8);
+    final hy = an.of(SysType.hybrid);
+    expect(hy.batteryKwh, closeTo(4 * 0.3 / 0.9, 0.11)); // from critical load, not 60% of inverter
+    expect(limitWarnings(hy, cfg).length, greaterThanOrEqualTo(2));
+    for (final t in SysType.values) {
+      final o = an.of(t);
+      final bom = buildBom(o, dcr: true, profile: LoadProfile.residential);
+      expect(bom.total, closeTo(o.gross, 0.5));
+    }
+    expect(recommend(LoadProfile.industrial, 30), SysType.onGrid);
+    expect(recommend(LoadProfile.agricultural, 5), SysType.offGrid);
+    expect(recommend(LoadProfile.residential, 5, cutHours: 3), SysType.hybrid);
+    expect(subsidyNote(LoadProfile.commercial, true, SysType.onGrid), contains('CA'));
+    final a = ApplRecord(id: '1', at: 1, label: 'x', cfg: cfg, items: const [], gross: 100);
+    final b = ApplRecord.fromJson(a.toJson());
+    expect(b.signature, a.signature);
+    expect(solarCurve(10).fold(0.0, (x, y) => x + y), closeTo(10, 1e-9));
   });
 
   testWidgets('settings and profile dialogs open and save', (t) async {

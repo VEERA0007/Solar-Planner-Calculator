@@ -161,9 +161,10 @@ class Appliance {
   String id, name;
   double watts, hours;
   int qty, start;
-  Appliance({required this.id, required this.name, required this.watts, required this.qty, required this.hours, required this.start});
+  bool backup; // keep running on battery during a power cut
+  Appliance({required this.id, required this.name, required this.watts, required this.qty, required this.hours, required this.start, this.backup = false});
   Map<String, dynamic> toJson() =>
-      {'id': id, 'name': name, 'watts': watts, 'qty': qty, 'hours': hours, 'start': start};
+      {'id': id, 'name': name, 'watts': watts, 'qty': qty, 'hours': hours, 'start': start, 'backup': backup};
   factory Appliance.fromJson(Map<String, dynamic> j) => Appliance(
         id: (j['id'] as String?) ?? DateTime.now().microsecondsSinceEpoch.toString(),
         name: (j['name'] as String?) ?? 'Appliance',
@@ -171,6 +172,7 @@ class Appliance {
         qty: (j['qty'] as num?)?.toInt() ?? 1,
         hours: (j['hours'] as num?)?.toDouble() ?? 0,
         start: (j['start'] as num?)?.toInt() ?? 0,
+        backup: (j['backup'] as bool?) ?? false,
       );
 }
 
@@ -223,6 +225,8 @@ class AppState extends ChangeNotifier {
   bool syncing = false;
   int tab = 0;
   ApplCfg appl = ApplCfg();
+  Rates rates = const Rates();
+  List<ApplRecord> applHistory = [];
   /// Set by Appliance Analysis; the Estimator picks it up when it opens.
   EstimateInput? estimatePush;
 
@@ -265,6 +269,10 @@ class AppState extends ChangeNotifier {
       if (sv != null) services = sv.whereType<Map>().map((e) => ServiceEntry.fromJson(e.cast<String, dynamic>())).toList();
       final ap = obj('appl');
       if (ap != null) appl = ApplCfg.fromJson(ap);
+      final rt = obj('appl_rates');
+      if (rt != null) rates = Rates.fromJson(rt);
+      final ah = list('appl_hist');
+      if (ah != null) applHistory = ah.whereType<Map>().map((e) => ApplRecord.fromJson(e.cast<String, dynamic>())).toList();
       final pr = obj('profile');
       if (pr != null) profile = Profile.fromJson(pr);
       final pf = obj('prefs');
@@ -311,6 +319,12 @@ class AppState extends ChangeNotifier {
   void saveSite() { _save('site', site.toJson()); notifyListeners(); }
   void saveBrand() { _save('brand', brand.toJson()); notifyListeners(); }
   void saveAppl() { _save('appl', appl.toJson()); notifyListeners(); }
+  void saveRates() { _save('appl_rates', rates.toJson()); notifyListeners(); }
+  void saveApplHistory() {
+    if (applHistory.length > 100) applHistory = applHistory.sublist(0, 100);
+    _save('appl_hist', applHistory.map((e) => e.toJson()).toList());
+    notifyListeners();
+  }
   void saveAppliances() { _save('appliances', appliances.map((e) => e.toJson()).toList()); notifyListeners(); }
   void saveServices() {
     services.sort((a, b) => b.date.compareTo(a.date));
@@ -475,6 +489,8 @@ class AppState extends ChangeNotifier {
     records = [];
     appliances = _defaultAppliances();
     appl = ApplCfg();
+    rates = const Rates();
+    applHistory = [];
     estimatePush = null;
     lastCleaned = null;
     services = [];

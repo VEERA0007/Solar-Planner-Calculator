@@ -191,17 +191,10 @@ void main() {
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);
       await _shot(t, 'appl-offgrid-$n');
-      final tl = t.getTopLeft(find.text('On-Grid System'));
-      debugPrint('DBG before ${s.appl.sys} topLeft=$tl');
-      await t.tapAt(tl + const Offset(40, 10));
-      await t.pump(const Duration(milliseconds: 500));
-      debugPrint('DBG after tapAt+40 ${s.appl.sys}');
-      await t.tap(find.text('Hybrid System'), warnIfMissed: false);
-      await t.pump(const Duration(milliseconds: 500));
-      debugPrint('DBG after tap hybrid ${s.appl.sys}');
+      await t.tap(find.text('Hybrid System'), warnIfMissed: false); // first tap also drops the field focus
+      await t.pump(const Duration(milliseconds: 300));
       await t.tap(find.text('On-Grid System'), warnIfMissed: false);
       await t.pump(const Duration(milliseconds: 500));
-      debugPrint('DBG after tap ongrid ${s.appl.sys}');
       expect(t.takeException(), isNull);
       await _shot(t, 'appl-ongrid-$n');
       expect(s.appl.sys, SysType.onGrid);

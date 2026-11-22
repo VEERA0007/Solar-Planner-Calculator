@@ -77,6 +77,7 @@ const List<Preset> kPresets = [
   Preset('Dehumidifier', 'Cooling', 300, 4),
   // ---- kitchen
   Preset('Double Door Refrigerator', 'Kitchen', 110, 24, start: 0, variants: [('Single door 90W', 90), ('Double door 110W', 110), ('Side-by-side 190W', 190)]),
+  Preset('Frost-Free Refrigerator', 'Kitchen', 120, 24, start: 0),
   Preset('Deep Freezer', 'Kitchen', 150, 24, start: 0),
   Preset('Mixer Grinder', 'Kitchen', 500, 0.5, start: 7),
   Preset('Wet Grinder', 'Kitchen', 250, 0.5, start: 7),
@@ -119,8 +120,9 @@ const List<Preset> kPresets = [
   Preset('Irrigation Pump 10 HP', 'Water & Pumps', 7500, 5, start: 8),
   Preset('Drip Irrigation Controller', 'Water & Pumps', 120, 6, start: 6),
   // ---- latest & EV
-  Preset('EV Car Charger (3.3 kW)', 'Latest & EV', 3300, 3, start: 21, variants: [('3.3 kW AC', 3300), ('7.4 kW AC', 7400)]),
-  Preset('E-Scooter / E-Bike Charger', 'Latest & EV', 400, 3, start: 22),
+  Preset('EV Car Home Charger', 'Latest & EV', 3300, 3, start: 21, variants: [('3.3 kW AC', 3300), ('7.4 kW AC', 7400)]),
+  Preset('Scooter Charger', 'Latest & EV', 800, 3, start: 22),
+  Preset('E-Bike Charger', 'Latest & EV', 250, 4, start: 22),
   Preset('Smart AC (Wi-Fi Inverter)', 'Latest & EV', 1000, 8, start: 22),
   Preset('Air Purifier (HEPA)', 'Latest & EV', 55, 10, start: 20),
   Preset('Robot Vacuum Cleaner', 'Latest & EV', 45, 1, start: 11),
@@ -209,14 +211,14 @@ SysOption buildOption({
   final battery = type.hasBattery && backupHours > 0 ? _round(backupHours * math.min(inv, math.max(connectedKw, 0.5)) * 0.6 / 0.9, 0.1) : 0.0;
   final rate = dcr ? 54000 : 46000;
   var gross = kwp * rate;
-  if (type == SysType.hybrid) gross += kwp * 8800;
-  if (type == SysType.offGrid) gross += kwp * 5700;
+  if (type == SysType.hybrid) gross += kwp * 9015;
+  if (type == SysType.offGrid) gross += kwp * 5769;
   gross += battery * 24000;
   gross = _round(gross, 50);
   final eligible = type != SysType.offGrid && dcr && profile == LoadProfile.residential;
   final monthly = dailyKwh * 30;
   final gen = kwp * y * 30;
-  final loss = const [1.0, 0.99, 0.98][type.index];
+  final loss = const [0.98, 0.999, 1.0][type.index];
   final save = math.min(gen, monthly) * tariff * loss;
   final sub = eligible ? centralSubsidy(kwp) : 0.0;
   final net = gross - sub;
@@ -242,19 +244,23 @@ SysOption buildOption({
   );
 }
 
-/// Which system fits the customer best (the "Best Match" tag).
-SysType recommend(LoadProfile profile, double backupHours, SysType chosen) {
-  if (chosen == SysType.offGrid) return SysType.offGrid; // the customer asked for standalone
-  if (backupHours > 0) return SysType.hybrid;
+/// Which system fits the customer best (the "Best Match" tag): heavy industrial
+/// loads go standalone, high residential demand pairs with a hybrid, the rest
+/// export under net metering.
+SysType recommend(LoadProfile profile, double dailyKwh) {
+  if (profile == LoadProfile.industrial) return SysType.offGrid;
+  if (profile == LoadProfile.residential && dailyKwh >= 10) return SysType.hybrid;
   return SysType.onGrid;
 }
 
-String recommendText(SysType t, LoadProfile p, double connectedKw) {
+String recommendText(SysOption o, LoadProfile p, double dailyKwh, double connectedKw) {
   final kw = connectedKw.toStringAsFixed(2);
-  return switch (t) {
-    SysType.onGrid => 'Lowest cost and fastest payback: ${p.label.toLowerCase()} load ($kw kW) exports surplus under net metering.',
-    SysType.hybrid => 'Grid + battery: ${p.label.toLowerCase()} load ($kw kW) keeps critical loads running during power cuts.',
-    SysType.offGrid => '${p == LoadProfile.industrial ? 'Heavy industrial' : p.label} load ($kw kW) suits Off-Grid PCU with battery storage for daytime / rural autonomy.',
+  final bat = o.batteryKwh == o.batteryKwh.roundToDouble() ? o.batteryKwh.toInt().toString() : o.batteryKwh.toStringAsFixed(1);
+  final inv = o.invKw == o.invKw.roundToDouble() ? o.invKw.toInt().toString() : o.invKw.toStringAsFixed(1);
+  return switch (o.type) {
+    SysType.onGrid => '${p.label} daytime load ($kw kW peak) matches solar generation: On-Grid net metering gives the lowest Capex and fastest payback.',
+    SysType.hybrid => 'High ${dailyKwh.toStringAsFixed(1)} kWh/day demand ($kw kW peak) pairs best with a $inv kW Hybrid Inverter & $bat kWh backup.',
+    SysType.offGrid => 'Heavy ${p.label.toLowerCase()} load ($kw kW) suits Off-Grid PCU + $bat kWh storage for daytime/rural autonomy.',
   };
 }
 
@@ -278,11 +284,11 @@ Bom buildBom(SysOption o, {required bool dcr, required LoadProfile profile}) {
   final removed = <String>[];
   String kw(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
   items.add(BomItem(
-    dcr ? '550W DCR Solar Modules (Tata Power Solar)' : '550W Mono PERC Solar Modules (Non-DCR)',
-    dcr ? 'Mono PERC M10 Half-Cut · ALMM Made-in-India Cells · 2278 × 1134 mm' : 'Mono PERC M10 Half-Cut · Imported Cells · 2278 × 1134 mm',
+    dcr ? '550W DCR Solar Modules (Tata Power Solar)' : '550W Non-DCR Tier-1 Modules (Tata Power Solar)',
+    dcr ? 'Mono PERC M10 Half-Cut · ALMM Made-in-India Cells · 2278 × 1134 mm' : 'Mono PERC M10 Half-Cut · Open Supply · 2278 × 1134 mm',
     dcr
         ? (t == SysType.offGrid ? 'Filtered DCR ALMM domestic modules selected (Note: Off-Grid excludes grid DBT subsidy).' : 'Filtered DCR domestic modules required for PM Surya Ghar Govt DBT subsidy.')
-        : 'Non-DCR modules selected: lower Capex but not eligible for central subsidy.',
+        : 'Filtered Non-DCR Tier-1 modules selected for lower upfront cost.',
     'PV MODULES',
     '${o.panels} Nos (${o.kwp.toStringAsFixed(2)} kWp)',
     0,

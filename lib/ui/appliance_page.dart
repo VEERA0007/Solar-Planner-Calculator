@@ -87,7 +87,7 @@ class _AppliancePageState extends State<AppliancePage> {
       panelWp: 550,
       costPerKw: (o.gross / o.kwp).roundToDouble(),
       category: cfg.profile == LoadProfile.residential ? 'residential' : 'commercial',
-      subsidy: o.subsidy > 0,
+      subsidy: cfg.dcr,
     );
     s.estimatePush = inp;
     s.publishEstimate(o.kwp, s.unitPrice);
@@ -122,6 +122,7 @@ class _AppliancePageState extends State<AppliancePage> {
 
   @override
   Widget build(BuildContext context) {
+    if (s.tab != 2) calculated = false; // results collapse when you leave the tab, like the reference
     final dark = s.isDark(DateTime.now());
     final psh = s.monthly?.forMonth(DateTime.now().month);
     final sub = calculated ? '${cfg.sys.label} · ${cfg.dcr ? 'DCR' : 'Non-DCR'} · ${monthly.round()} kWh/mo' : '${cfg.profile.label.toUpperCase()} · ${monthly.round()} kWh/mo';
@@ -207,13 +208,13 @@ class _AppliancePageState extends State<AppliancePage> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Expanded(child: Text('APPLICATION ENERGY CONSUMPTION', style: TextStyle(color: Color(0xFF34D399), fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: .5, height: 1.25))),
+          Expanded(child: Text(calculated ? 'CALCULATED CONSUMPTION & SIZING' : 'APPLICATION ENERGY CONSUMPTION', style: TextStyle(color: Color(0xFF34D399), fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: .5, height: 1.25))),
           const SizedBox(width: 8),
           Flexible(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(color: const Color(0xFF10B981).withValues(alpha: .18), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF10B981).withValues(alpha: .4))),
-              child: Text(cfg.profile.loadWord, textAlign: TextAlign.center, style: _mono(12.5, const Color(0xFF6EE7B7), w: FontWeight.w600)),
+              child: Text(calculated ? '${cfg.sys.label} · ${cfg.dcr ? 'DCR' : 'Non-DCR'}' : cfg.profile.loadWord, textAlign: TextAlign.center, style: _mono(12.5, const Color(0xFF6EE7B7), w: FontWeight.w600)),
             ),
           ),
         ]),
@@ -238,9 +239,15 @@ class _AppliancePageState extends State<AppliancePage> {
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             box('CONNECTED LOAD', '${connectedKw.toStringAsFixed(2)} kW', const Color(0xFF7DD3FC)),
             const SizedBox(width: 8),
-            box('APPLIANCES', '${s.appliances.length} Items', Colors.white),
-            const SizedBox(width: 8),
-            box('ANNUAL USAGE', '${inr0(monthly * 12)} kWh', const Color(0xFFFBBF24)),
+            if (calculated) ...[
+              box('INVERTER', '${_n(option(cfg.sys).invKw)} kW', Colors.white),
+              const SizedBox(width: 8),
+              box('BATTERY BANK', option(cfg.sys).batteryKwh > 0 ? '${option(cfg.sys).batteryKwh.toStringAsFixed(1)} kWh' : 'Grid-Only', const Color(0xFFFBBF24)),
+            ] else ...[
+              box('APPLIANCES', '${s.appliances.length} Items', Colors.white),
+              const SizedBox(width: 8),
+              box('ANNUAL USAGE', '${inr0(monthly * 12)} kWh', const Color(0xFFFBBF24)),
+            ],
           ]),
         ),
         const SizedBox(height: 12),
@@ -249,12 +256,12 @@ class _AppliancePageState extends State<AppliancePage> {
         Row(children: [
           const Icon(Icons.link, color: Color(0xFF34D399), size: 20),
           const SizedBox(width: 8),
-          const Expanded(child: Text('Configure appliances & calculate below', style: TextStyle(color: Colors.white, fontSize: 14))),
+          Expanded(child: Text(calculated ? 'Synced live with Solar Estimator' : 'Configure appliances & calculate below', style: const TextStyle(color: Colors.white, fontSize: 14))),
           const SizedBox(width: 8),
           FilledButton.icon(
-            onPressed: _calculate,
-            icon: const Icon(Icons.calculate_outlined, size: 20),
-            label: const Text('Calculate', style: TextStyle(fontWeight: FontWeight.w800)),
+            onPressed: calculated ? _openEstimator : _calculate,
+            icon: Icon(calculated ? Icons.arrow_forward : Icons.calculate_outlined, size: 20),
+            label: Text(calculated ? 'Open Estimator' : 'Calculate', style: const TextStyle(fontWeight: FontWeight.w800)),
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFFFFA000), foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12)),
           ),
         ]),
@@ -513,7 +520,7 @@ class _AppliancePageState extends State<AppliancePage> {
 
   // ---------- results ----------
   Widget _moduleCard() {
-    final eligible = cfg.dcr && cfg.profile == LoadProfile.residential && cfg.sys != SysType.offGrid;
+    final eligible = cfg.dcr;
     return _Card(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -528,8 +535,8 @@ class _AppliancePageState extends State<AppliancePage> {
           const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(color: eligible ? C.chipGreen : C.chip, borderRadius: BorderRadius.circular(14)),
-            child: Text(eligible ? 'Subsidy Eligible' : 'No Subsidy', style: TextStyle(color: eligible ? C.green : C.mute, fontWeight: FontWeight.w800, fontSize: 12)),
+            decoration: BoxDecoration(color: eligible ? C.chipGreen : C.chipBlue, borderRadius: BorderRadius.circular(14)),
+            child: Text(eligible ? 'Subsidy Eligible' : 'Open Category', style: TextStyle(color: eligible ? C.green : C.sky, fontWeight: FontWeight.w800, fontSize: 12)),
           ),
         ]),
         const SizedBox(height: 14),
@@ -539,9 +546,9 @@ class _AppliancePageState extends State<AppliancePage> {
           child: Row(children: [
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(cfg.dcr ? 'DCR (Made-in-India / ALMM)' : 'Non-DCR (Imported cells)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 15.5)),
+                Text(cfg.dcr ? 'DCR (Made-in-India / ALMM)' : 'Non-DCR (Open Category)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 15.5)),
                 const SizedBox(height: 3),
-                Text(cfg.dcr ? 'Eligible for PM Surya Ghar subsidy (residential, grid-connected)' : 'Lower Capex · not eligible for central subsidy', style: TextStyle(color: C.mute, fontSize: 13)),
+                Text(cfg.dcr ? 'Eligible for PM Surya Ghar subsidy (residential, grid-connected)' : 'Lower upfront equipment cost · open supply, no DBT subsidy', style: TextStyle(color: C.mute, fontSize: 13)),
               ]),
             ),
             const SizedBox(width: 8),
@@ -568,7 +575,7 @@ class _AppliancePageState extends State<AppliancePage> {
       ]);
 
   Widget _optionsCard() {
-    final rec = recommend(cfg.profile, cfg.hours, cfg.sys);
+    final rec = recommend(cfg.profile, daily);
     return _Card(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -591,7 +598,7 @@ class _AppliancePageState extends State<AppliancePage> {
             Expanded(
               child: Text.rich(TextSpan(style: const TextStyle(fontSize: 14.5, height: 1.35), children: [
                 TextSpan(text: 'Recommended (${rec.label}): ', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
-                TextSpan(text: recommendText(rec, cfg.profile, connectedKw)),
+                TextSpan(text: recommendText(option(rec), cfg.profile, daily, connectedKw)),
               ])),
             ),
           ]),
@@ -675,7 +682,7 @@ class _AppliancePageState extends State<AppliancePage> {
             ),
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Text(rupee(o.net), style: _mono(18, C.text)),
-              Text(o.subsidy > 0 ? 'After ${rupee(o.subsidy)} subsidy' : (o.type == SysType.offGrid ? 'Standalone (0 Subsidy)' : 'Turnkey Cost'), textAlign: TextAlign.right, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 12)),
+              Text(o.subsidy > 0 ? 'Net after -${rupee(o.subsidy)} subsidy' : (o.type == SysType.offGrid ? 'Standalone (0 Subsidy)' : 'Turnkey Cost'), textAlign: TextAlign.right, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 12)),
             ]),
           ]),
           const SizedBox(height: 10),
@@ -837,7 +844,7 @@ class _AppliancePageState extends State<AppliancePage> {
   Widget _bomCard() {
     final o = option(cfg.sys);
     final bom = buildBom(o, dcr: cfg.dcr, profile: cfg.profile);
-    const tabs = ['All Parts', 'PV, Inv & Battery', 'BOS & Structure', 'Metering & Compliance'];
+    const tabs = ['All Parts', 'PV, Inv & Battery', 'BOS & Structure', 'Meters & Docs'];
     final shown = [for (final i in bom.items) if (bomTab == 0 || i.tab == bomTab - 1) i];
     final counts = [bom.items.length, for (var k = 0; k < 3; k++) bom.items.where((i) => i.tab == k).length];
     return _Card(

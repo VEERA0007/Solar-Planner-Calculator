@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:calculator/core/service_data.dart';
 import 'package:calculator/core/store.dart';
+import 'package:calculator/ui/service_space.dart';
 import 'package:calculator/main.dart' show Shell;
 import 'package:calculator/ui/sun_scene.dart';
 import 'package:calculator/ui/theme.dart';
@@ -91,6 +93,71 @@ void main() {
         await t.pumpWidget(const SizedBox());
       });
     }
+  }
+
+  for (final dark in [false, true]) {
+    testWidgets('service tab pages ${dark ? 'night' : 'day'} have no layout errors', (t) async {
+      SharedPreferences.setMockInitialValues({});
+      SpaceTab.testPreset = SpaceWx(
+        f107: 158, flareClass: 'C2.1', regions: 6, kp: 2.67, pC: 90, pM: 35, pX: 5, fetched: DateTime.now(),
+        kpHistory: [for (var i = 0; i < 8; i++) KpBlock(DateTime(2026, 11, 21, i * 3), [2.0, 2.3, 3.0, 2.7, 3.3, 2.3, 2.0, 2.7][i])],
+      );
+      addTearDown(() => SpaceTab.testPreset = null);
+      final s = AppState();
+      await t.runAsync(() => s.load());
+      s.prefs.dark = dark;
+      s.profile
+        ..name = 'Test Owner'
+        ..inverter = 'Growatt 3.3kW'
+        ..panel = 'Waaree 550W Mono'
+        ..helpline = '+91 98450 12345'
+        ..commission = '18/04/2025';
+      s.services = [
+        ServiceEntry(id: '1', type: ServiceType.cleaning, date: DateTime.now().subtract(const Duration(days: 40)), title: 'Post-Monsoon Deep Cleaning & Rinsing', technician: 'GreenSun Solar Care', yieldGain: 7.4, cost: 800, notes: 'De-ionized water wash.', nextDue: DateTime.now().add(const Duration(days: 20))),
+        ServiceEntry(id: '2', type: ServiceType.inverter, date: DateTime.now().subtract(const Duration(days: 120)), title: 'Bi-Annual Inverter Health & DC String Check', technician: 'Rajesh Sharma', soiling: 'healthy', cost: 1200, notes: 'Voc and Isc within 2%.', nextDue: DateTime.now().add(const Duration(days: 60))),
+      ];
+      t.view.physicalSize = const Size(412, 915);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(Harness(s));
+      await t.pump(const Duration(seconds: 1));
+      await t.tap(find.text('Service').last);
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      final n = dark ? 'night' : 'day';
+      await _shot(t, 'service-maint-$n');
+      await t.drag(find.byType(ListView).last, const Offset(0, -600));
+      await t.pump(const Duration(milliseconds: 500));
+      await _shot(t, 'service-maint2-$n');
+      await t.tap(find.text('+ Log Wash'));
+      await t.pumpAndSettle();
+      await _shot(t, 'service-log-$n');
+      await t.tap(find.text('Cancel'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Tilt & Angles'));
+      await t.pump(const Duration(seconds: 1));
+      await _shot(t, 'service-tilt-curve-$n');
+      await t.tap(find.text('Seasonal Tilt'));
+      await t.pump(const Duration(seconds: 1));
+      await _shot(t, 'service-tilt-season-$n');
+      await t.tap(find.text('Trackers (1X/2X)'));
+      await t.pump(const Duration(seconds: 1));
+      await _shot(t, 'service-tilt-track-$n');
+      await t.tap(find.text('Bubble Level'));
+      await t.pump(const Duration(seconds: 2));
+      await _shot(t, 'service-level-$n');
+      await t.tap(find.text('Space Weather'));
+      await t.pump(const Duration(seconds: 1));
+      await _shot(t, 'service-space-flux-$n');
+      await t.tap(find.text('Kp-Index'));
+      await t.pump(const Duration(seconds: 1));
+      await _shot(t, 'service-space-kp-$n');
+      await t.tap(find.text('Sun Report'));
+      await t.pump(const Duration(seconds: 1));
+      await _shot(t, 'service-space-sun-$n');
+      expect(t.takeException(), isNull);
+      await t.pumpWidget(const SizedBox());
+    });
   }
 
   testWidgets('settings and profile dialogs open and save', (t) async {

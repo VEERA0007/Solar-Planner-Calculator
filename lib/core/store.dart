@@ -1,3 +1,4 @@
+import 'service_data.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -45,7 +46,7 @@ class Site {
 /// Owner and plant details (Profile dialog). System capacity lives in [Site.kwp].
 class Profile {
   String name, serviceNo, mobile, pin, email, address;
-  String roofType, panel, inverter, commission;
+  String roofType, panel, inverter, commission, helpline;
   double roofSqft;
   int warranty;
   Profile({
@@ -59,13 +60,14 @@ class Profile {
     this.panel = '',
     this.inverter = '',
     this.commission = '',
+    this.helpline = '',
     this.roofSqft = 700,
     this.warranty = 25,
   });
   Map<String, dynamic> toJson() => {
         'name': name, 'serviceNo': serviceNo, 'mobile': mobile, 'pin': pin, 'email': email,
         'address': address, 'roofType': roofType, 'panel': panel, 'inverter': inverter,
-        'commission': commission, 'roofSqft': roofSqft, 'warranty': warranty,
+        'commission': commission, 'helpline': helpline, 'roofSqft': roofSqft, 'warranty': warranty,
       };
   factory Profile.fromJson(Map<String, dynamic> j) {
     final d = Profile();
@@ -73,7 +75,7 @@ class Profile {
     return Profile(
       name: t('name', ''), serviceNo: t('serviceNo', ''), mobile: t('mobile', ''), pin: t('pin', ''),
       email: t('email', ''), address: t('address', ''), roofType: t('roofType', d.roofType),
-      panel: t('panel', ''), inverter: t('inverter', ''), commission: t('commission', ''),
+      panel: t('panel', ''), inverter: t('inverter', ''), commission: t('commission', ''), helpline: t('helpline', ''),
       roofSqft: (j['roofSqft'] as num?)?.toDouble() ?? d.roofSqft,
       warranty: (j['warranty'] as num?)?.toInt() ?? d.warranty,
     );
@@ -213,6 +215,8 @@ class AppState extends ChangeNotifier {
   Place? place;
   MonthlyPsh? monthly;
   DateTime? lastCleaned;
+  List<ServiceEntry> services = [];
+  WeatherNow? weather;
   Irradiance? irr;
   DateTime? lastSync;
   bool syncing = false;
@@ -253,6 +257,8 @@ class AppState extends ChangeNotifier {
       if (r != null) {
         records = r.whereType<Map>().map((e) => SavedRecord.fromJson(e.cast<String, dynamic>())).toList();
       }
+      final sv = list('services');
+      if (sv != null) services = sv.whereType<Map>().map((e) => ServiceEntry.fromJson(e.cast<String, dynamic>())).toList();
       final pr = obj('profile');
       if (pr != null) profile = Profile.fromJson(pr);
       final pf = obj('prefs');
@@ -299,6 +305,16 @@ class AppState extends ChangeNotifier {
   void saveSite() { _save('site', site.toJson()); notifyListeners(); }
   void saveBrand() { _save('brand', brand.toJson()); notifyListeners(); }
   void saveAppliances() { _save('appliances', appliances.map((e) => e.toJson()).toList()); notifyListeners(); }
+  void saveServices() {
+    services.sort((a, b) => b.date.compareTo(a.date));
+    _save('services', services.map((e) => e.toJson()).toList());
+    final cleans = services.where((e) => e.type == ServiceType.cleaning);
+    if (cleans.isNotEmpty) {
+      lastCleaned = cleans.first.date;
+      _p?.setInt('lastCleaned', lastCleaned!.millisecondsSinceEpoch);
+    }
+    notifyListeners();
+  }
   void saveRecords() { _save('records', records.map((e) => e.toJson()).toList()); notifyListeners(); }
 
   void setTab(int i) { tab = i; notifyListeners(); }
@@ -315,6 +331,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     irr = await fetchIrradiance(site.lat, site.lon);
     monthly ??= await loadMonthlyPsh(site.lat, site.lon);
+    weather = await fetchWeatherNow(site.lat, site.lon) ?? weather;
     lastSync = DateTime.now();
     _p?.setInt('lastSync', lastSync!.millisecondsSinceEpoch);
     syncing = false;
@@ -451,6 +468,8 @@ class AppState extends ChangeNotifier {
     records = [];
     appliances = _defaultAppliances();
     lastCleaned = null;
+    services = [];
+    weather = null;
     input = EstimateInput();
     customer = Customer();
     result = null;

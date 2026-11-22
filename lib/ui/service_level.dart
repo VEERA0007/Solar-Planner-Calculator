@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -8,6 +9,8 @@ import 'theme.dart';
 /// Bubble level for checking the tilt of panels and mounting structures with
 /// the phone's accelerometer. Drag the bubble if the device has no sensor.
 class LevelTab extends StatefulWidget {
+  /// Set in tests: skips the platform sensor channel.
+  static bool disableSensor = false;
   const LevelTab({super.key});
   @override
   State<LevelTab> createState() => _LevelTabState();
@@ -28,9 +31,12 @@ class _LevelTabState extends State<LevelTab> {
   @override
   void initState() {
     super.initState();
-    try {
+    final hasSensor = !LevelTab.disableSensor && !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+    if (hasSensor) {
+      try {
       _sub = accelerometerEventStream(samplingPeriod: SensorInterval.uiInterval).listen(_onEvent, onError: (_) {}, cancelOnError: false);
-    } catch (_) {}
+      } catch (_) {}
+    }
     _noSensor = Timer(const Duration(milliseconds: 1800), () {
       if (mounted && !_live) setState(() => _showNoSensor = true);
     });

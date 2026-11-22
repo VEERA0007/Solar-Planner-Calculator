@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:calculator/core/service_data.dart';
 import 'package:calculator/core/store.dart';
+import 'package:calculator/ui/service_level.dart';
 import 'package:calculator/ui/service_space.dart';
 import 'package:calculator/main.dart' show Shell;
 import 'package:calculator/ui/sun_scene.dart';
@@ -67,6 +68,7 @@ Future<void> _shot(WidgetTester t, String name) async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() async {
+    LevelTab.disableSensor = true;
     SunScene.animate = false; // keeps pumpAndSettle finite
     PackageInfo.setMockInitialValues(
         appName: 'Solar Planner', packageName: 'com.solarplanner.calculator', version: '0.0.7', buildNumber: '1', buildSignature: '');

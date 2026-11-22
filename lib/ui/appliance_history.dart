@@ -129,7 +129,7 @@ class _ApplHistoryPageState extends State<ApplHistoryPage> {
         builder: (context, _) {
           final all = s.applHistory;
           final t = q.trim().toLowerCase();
-          final list = [for (final r in all) if (t.isEmpty || r.label.toLowerCase().contains(t) || r.note.toLowerCase().contains(t) || r.cfg.profile.label.toLowerCase().contains(t))] ;
+          final list = [for (final r in all) if (t.isEmpty || r.label.toLowerCase().contains(t) || r.note.toLowerCase().contains(t) || r.cfg.profile.label.toLowerCase().contains(t)) r];
           return Scaffold(
             backgroundColor: C.bg,
             appBar: AppBar(

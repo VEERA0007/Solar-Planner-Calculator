@@ -263,7 +263,7 @@ class _AppliancePageState extends State<AppliancePage> {
   }
 
   String inr0(num v) {
-    final t = inr(v);
+    final t = rupee(v);
     return t.substring(1);
   }
 
@@ -673,8 +673,8 @@ class _AppliancePageState extends State<AppliancePage> {
               ]),
             ),
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(inr(o.net), style: _mono(18, C.text)),
-              Text(o.subsidy > 0 ? 'After ${inr(o.subsidy)} subsidy' : (o.type == SysType.offGrid ? 'Standalone (0 Subsidy)' : 'Turnkey Cost'), textAlign: TextAlign.right, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 12)),
+              Text(rupee(o.net), style: _mono(18, C.text)),
+              Text(o.subsidy > 0 ? 'After ${rupee(o.subsidy)} subsidy' : (o.type == SysType.offGrid ? 'Standalone (0 Subsidy)' : 'Turnkey Cost'), textAlign: TextAlign.right, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 12)),
             ]),
           ]),
           const SizedBox(height: 10),
@@ -691,7 +691,7 @@ class _AppliancePageState extends State<AppliancePage> {
           Row(children: [
             Expanded(child: Text(const ['Grid-Tied String MPPT Inverter', 'Bidirectional Hybrid MPPT (<10ms UPS)', 'Off-Grid Pure Sine MPPT PCU'][o.type.index], maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 12.5))),
             const SizedBox(width: 6),
-            Text('Save ${inr(o.savePerMonth)}/mo · ${o.payback.toStringAsFixed(1)} Yrs', style: _mono(12.5, C.green)),
+            Text('Save ${rupee(o.savePerMonth)}/mo · ${o.payback.toStringAsFixed(1)} Yrs', style: _mono(12.5, C.green)),
           ]),
         ]),
       ),

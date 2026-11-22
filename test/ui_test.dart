@@ -218,7 +218,7 @@ void main() {
     expect(bomOn.removed.length, 3);
     expect(bomOff.removed.length, 1);
     expect(bomOff.items.length > bomOn.items.length, isTrue);
-    expect(inr(386100), '₹386,100');
+    expect(rupee(386100), '₹386,100');
   });
 
   testWidgets('settings and profile dialogs open and save', (t) async {

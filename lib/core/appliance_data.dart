@@ -380,7 +380,7 @@ Bom buildBom(SysOption o, {required bool dcr, required LoadProfile profile}) {
   return Bom(items, removed);
 }
 
-String inr(num v) {
+String rupee(num v) {
   final s = v.round().abs().toString();
   final b = StringBuffer();
   for (var i = 0; i < s.length; i++) {

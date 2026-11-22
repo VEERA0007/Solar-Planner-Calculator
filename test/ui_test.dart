@@ -199,8 +199,10 @@ void main() {
       expect(t.takeException(), isNull);
       await _shot(t, 'appl-ongrid-$n');
       expect(s.appl.sys, SysType.onGrid);
-      await t.drag(find.descendant(of: find.byType(AppliancePage), matching: find.byType(ListView)).first, const Offset(0, -4000));
-      await t.pump(const Duration(milliseconds: 500));
+      for (var i = 0; i < 8 && find.textContaining('in Estimator').evaluate().isEmpty; i++) {
+        await t.drag(find.descendant(of: find.byType(AppliancePage), matching: find.byType(ListView)).first, const Offset(0, -3000));
+        await t.pump(const Duration(milliseconds: 300));
+      }
       await _shot(t, 'appl-bom-$n');
       await t.tap(find.textContaining('in Estimator'));
       await t.pump(const Duration(seconds: 1));

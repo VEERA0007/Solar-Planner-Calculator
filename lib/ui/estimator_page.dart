@@ -45,10 +45,26 @@ class _EstimatorPageState extends State<EstimatorPage> {
     super.initState();
     _fill(EstimateInput());
     final p = widget.state.profile;
+    _takePush();
     usc.text = p.serviceNo;
     name.text = p.name;
     phone.text = p.mobile;
     address.text = p.address;
+  }
+
+  @override
+  void didUpdateWidget(covariant EstimatorPage old) {
+    super.didUpdateWidget(old);
+    if (widget.state.estimatePush != null) setState(_takePush);
+  }
+
+  /// Appliance Analysis hands its chosen system over through the app state.
+  void _takePush() {
+    final push = widget.state.estimatePush;
+    if (push == null) return;
+    widget.state.estimatePush = null;
+    _fill(push);
+    sub = 0;
   }
 
   void _fill(EstimateInput d) {

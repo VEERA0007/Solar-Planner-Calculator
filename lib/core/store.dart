@@ -1,4 +1,5 @@
 import 'service_data.dart';
+import 'appliance_data.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -221,6 +222,9 @@ class AppState extends ChangeNotifier {
   DateTime? lastSync;
   bool syncing = false;
   int tab = 0;
+  ApplCfg appl = ApplCfg();
+  /// Set by Appliance Analysis; the Estimator picks it up when it opens.
+  EstimateInput? estimatePush;
 
   // estimator working state (kept when switching tabs)
   Customer customer = Customer();
@@ -259,6 +263,8 @@ class AppState extends ChangeNotifier {
       }
       final sv = list('services');
       if (sv != null) services = sv.whereType<Map>().map((e) => ServiceEntry.fromJson(e.cast<String, dynamic>())).toList();
+      final ap = obj('appl');
+      if (ap != null) appl = ApplCfg.fromJson(ap);
       final pr = obj('profile');
       if (pr != null) profile = Profile.fromJson(pr);
       final pf = obj('prefs');
@@ -304,6 +310,7 @@ class AppState extends ChangeNotifier {
   void _save(String k, Object v) => _p?.setString(k, jsonEncode(v));
   void saveSite() { _save('site', site.toJson()); notifyListeners(); }
   void saveBrand() { _save('brand', brand.toJson()); notifyListeners(); }
+  void saveAppl() { _save('appl', appl.toJson()); notifyListeners(); }
   void saveAppliances() { _save('appliances', appliances.map((e) => e.toJson()).toList()); notifyListeners(); }
   void saveServices() {
     services.sort((a, b) => b.date.compareTo(a.date));
@@ -467,6 +474,8 @@ class AppState extends ChangeNotifier {
     prefs = Prefs();
     records = [];
     appliances = _defaultAppliances();
+    appl = ApplCfg();
+    estimatePush = null;
     lastCleaned = null;
     services = [];
     weather = null;

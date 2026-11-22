@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:calculator/core/appliance_data.dart';
 import 'package:calculator/core/service_data.dart';
 import 'package:calculator/core/store.dart';
 import 'package:calculator/ui/service_level.dart';
@@ -161,6 +162,64 @@ void main() {
       await t.pumpWidget(const SizedBox());
     });
   }
+
+
+  for (final dark in [false, true]) {
+    testWidgets('appliance analysis flow ${dark ? 'night' : 'day'} has no layout errors', (t) async {
+      SharedPreferences.setMockInitialValues({});
+      final s = AppState();
+      await t.runAsync(() => s.load());
+      s.prefs.dark = dark;
+      t.view.physicalSize = const Size(412, 3400);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(Harness(s));
+      await t.pump(const Duration(seconds: 1));
+      await t.tap(find.text('Appliance Analysis').last);
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      final n = dark ? 'night' : 'day';
+      await _shot(t, 'appl-top-$n');
+      await t.tap(find.text('Industrial').first);
+      await t.pump(const Duration(milliseconds: 300));
+      await t.tap(find.text('Off-Grid').first);
+      await t.pump(const Duration(milliseconds: 300));
+      await t.enterText(find.byType(TextField).at(0), '4');
+      await t.pump();
+      await t.tap(find.text('Calculate Application & View System Options'));
+      await t.pump(const Duration(seconds: 1));
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      await _shot(t, 'appl-offgrid-$n');
+      await t.tap(find.text('On-Grid System'));
+      await t.pump(const Duration(milliseconds: 500));
+      expect(t.takeException(), isNull);
+      await _shot(t, 'appl-ongrid-$n');
+      expect(s.appl.sys, SysType.onGrid);
+      await t.tap(find.textContaining('in Estimator'));
+      await t.pump(const Duration(seconds: 1));
+      expect(s.tab, 1);
+      expect(t.takeException(), isNull);
+      await _shot(t, 'appl-estimator-$n');
+      await t.pumpWidget(const SizedBox());
+    });
+  }
+
+  test('system sizing matches the reference numbers', () {
+    OptionCase(SysType t) => buildOption(type: t, dailyKwh: 19.26, connectedKw: 3.57, yieldPerKwp: 2.77, tariff: 9.5, dcr: true, profile: LoadProfile.industrial, backupHours: 0);
+    final on = OptionCase(SysType.onGrid), hy = OptionCase(SysType.hybrid), off = OptionCase(SysType.offGrid);
+    expect(on.panels < hy.panels && hy.panels < off.panels, isTrue);
+    expect(on.subsidy, 0); // industrial gets no residential subsidy
+    final res = buildOption(type: SysType.onGrid, dailyKwh: 16.8, connectedKw: 3.57, yieldPerKwp: 3.0, tariff: 8, dcr: true, profile: LoadProfile.residential, backupHours: 0);
+    expect(res.subsidy, 78000);
+    expect(centralSubsidy(2), 60000);
+    final bomOn = buildBom(on, dcr: true, profile: LoadProfile.industrial);
+    final bomOff = buildBom(off, dcr: true, profile: LoadProfile.industrial);
+    expect(bomOn.removed.length, 3);
+    expect(bomOff.removed.length, 1);
+    expect(bomOff.items.length > bomOn.items.length, isTrue);
+    expect(inr(386100), '₹386,100');
+  });
 
   testWidgets('settings and profile dialogs open and save', (t) async {
     SharedPreferences.setMockInitialValues({});

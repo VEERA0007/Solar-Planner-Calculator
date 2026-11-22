@@ -648,6 +648,7 @@ class _AppliancePageState extends State<AppliancePage> {
           ),
         );
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => _setSys(o.type),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
@@ -770,6 +771,7 @@ class _AppliancePageState extends State<AppliancePage> {
                 for (final t in SysType.values)
                   Expanded(
                     child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () => _setSys(t),
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 9),

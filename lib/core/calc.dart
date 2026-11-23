@@ -17,6 +17,11 @@ class EstimateInput {
   double escalation;
   int years;
   double co2PerKwh;
+  double omPct; // yearly maintenance as % of system cost (0 = ignored)
+  int? panelsOverride; // panel count decided by the system sizing, null = size here
+  bool dcr;
+  int sys; // 0 on-grid, 1 hybrid, 2 off-grid
+  double backupHours;
 
   EstimateInput({
     this.mode = 'units',
@@ -34,6 +39,11 @@ class EstimateInput {
     this.escalation = 3,
     this.years = 25,
     this.co2PerKwh = 0.82,
+    this.omPct = 0,
+    this.panelsOverride,
+    this.dcr = true,
+    this.sys = 0,
+    this.backupHours = 0,
   });
 
   EstimateInput copy() => EstimateInput.fromJson(toJson());
@@ -54,6 +64,11 @@ class EstimateInput {
         'escalation': escalation,
         'years': years,
         'co2PerKwh': co2PerKwh,
+        'omPct': omPct,
+        'panelsOverride': panelsOverride,
+        'dcr': dcr,
+        'sys': sys,
+        'backupHours': backupHours,
       };
 
   factory EstimateInput.fromJson(Map<String, dynamic> j) {
@@ -75,6 +90,11 @@ class EstimateInput {
       escalation: n('escalation', d.escalation),
       years: (j['years'] is num) ? (j['years'] as num).toInt() : d.years,
       co2PerKwh: n('co2PerKwh', d.co2PerKwh),
+      omPct: n('omPct', d.omPct),
+      panelsOverride: (j['panelsOverride'] is num) ? (j['panelsOverride'] as num).toInt() : null,
+      dcr: (j['dcr'] as bool?) ?? d.dcr,
+      sys: (j['sys'] is num) ? (j['sys'] as num).toInt().clamp(0, 2) : d.sys,
+      backupHours: n('backupHours', d.backupHours),
     );
   }
 }
@@ -145,7 +165,9 @@ EstimateResult calculate(EstimateInput i) {
   final panelWp = math.max(50.0, _fin(i.panelWp, 540));
 
   final neededKw = (annualUse * coverage) / perKwYear;
-  final panels = neededKw > 0 ? math.max(1, ((neededKw * 1000) / panelWp).ceil()) : 0;
+  final panels = i.panelsOverride != null && i.panelsOverride! > 0
+      ? i.panelsOverride!
+      : (neededKw > 0 ? math.max(1, ((neededKw * 1000) / panelWp).ceil()) : 0);
   final kw = (panels * panelWp) / 1000;
   final roofSqm = kw * _fin(i.areaPerKw, 10);
   final roofSqft = roofSqm * 10.7639;
@@ -165,7 +187,7 @@ EstimateResult calculate(EstimateInput i) {
   for (var y = 1; y <= years; y++) {
     final gen = gen1 * math.pow(1 - deg, y - 1);
     final t = tariff * math.pow(1 + esc, y - 1);
-    final saving = math.min(gen, annualUse) * t;
+    final saving = math.min(gen, annualUse) * t - cost * _fin(i.omPct, 0) / 100;
     final prev = cum;
     cum += saving;
     if (payback == null && netCost > 0 && cum >= netCost && saving > 0) {

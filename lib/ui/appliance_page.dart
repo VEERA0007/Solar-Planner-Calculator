@@ -135,8 +135,12 @@ class _AppliancePageState extends State<AppliancePage> {
       yieldPerKwDay: double.parse(s.locationYield.toStringAsFixed(2)),
       panelWp: 550,
       costPerKw: (o.gross / o.kwp).roundToDouble(),
-      category: cfg.profile == LoadProfile.residential ? 'residential' : 'commercial',
+      category: cfg.profile == LoadProfile.residential ? 'residential' : (cfg.profile == LoadProfile.agricultural ? 'agricultural' : 'commercial'),
       subsidy: cfg.dcr && cfg.profile == LoadProfile.residential,
+      dcr: cfg.dcr,
+      sys: cfg.sys.index,
+      backupHours: cfg.hours,
+      panelsOverride: o.panels,
     );
     s.estimatePush = inp;
     s.publishEstimate(o.kwp, s.unitPrice);

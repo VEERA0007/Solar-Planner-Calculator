@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/appliance_data.dart';
-import '../core/bill_parse.dart';
 import '../core/calc.dart';
 import '../core/estimator_data.dart';
 import '../core/service_data.dart';

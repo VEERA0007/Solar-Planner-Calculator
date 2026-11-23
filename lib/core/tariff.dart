@@ -47,10 +47,8 @@ class CategoryTariff {
   /// Rate of the last unit consumed (what one more unit costs).
   double marginal(double units) {
     final s = scheduleFor(units <= 0 ? 1 : units);
-    double prev = 0;
     for (final sl in s.slabs) {
       if (sl.upTo == null || units <= sl.upTo!) return sl.rate;
-      prev = sl.upTo!;
     }
     return s.slabs.last.rate;
   }

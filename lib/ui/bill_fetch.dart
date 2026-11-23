@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../core/bill_parse.dart';
 import '../core/estimator_data.dart';
+import '../core/tariff.dart';
 import '../core/store.dart';
 import 'theme.dart';
 

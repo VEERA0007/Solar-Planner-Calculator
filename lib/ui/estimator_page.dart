@@ -9,6 +9,7 @@ import '../core/service_data.dart';
 import '../core/store.dart';
 import 'bill_fetch.dart';
 import 'pdf_quote.dart';
+import 'roof_map.dart';
 import 'theme.dart';
 
 /// Solar Estimator: New Install flow (inputs, system, cost, ROI, customer page),
@@ -51,6 +52,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
   String exArch = 'String inverter (Central MPPT)';
   double? invOverride; // chosen inverter size in kW, null = the suggested size
   String payMsg = '';
+  RoofResult? roofTrace;
 
   AppState get s => widget.state;
 
@@ -313,6 +315,15 @@ class _EstimatorPageState extends State<EstimatorPage> {
       mode = 'usc';
       uscMsg = 'Units read from the DISCOM page (${h.entered.length} months). Check them with Edit 13-month units.';
       uscColor = C.green;
+    });
+  }
+
+  Future<void> _openRoofMap() async {
+    final r = await Navigator.of(context).push<RoofResult>(MaterialPageRoute(builder: (_) => RoofMapPage(state: s, panel: _panel)));
+    if (r == null || !mounted) return;
+    setState(() {
+      roofTrace = r;
+      roof.text = r.areaM2.round().toString();
     });
   }
 
@@ -608,12 +619,13 @@ class _EstimatorPageState extends State<EstimatorPage> {
             Expanded(child: _field(roof, 'Roof area', suffix: 'sq m')),
             const SizedBox(width: 10),
             OutlinedButton.icon(
-              onPressed: () => toast(context, 'Satellite roof map is planned for a later build'),
+              onPressed: _openRoofMap,
               icon: const Icon(Icons.location_on_outlined, size: 18),
               label: const Text('Map', style: TextStyle(fontWeight: FontWeight.w800)),
               style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), foregroundColor: C.orange, side: BorderSide(color: C.orange.withValues(alpha: .6))),
             ),
           ]),
+          if (roofTrace != null) _note(Icons.roofing, C.green, 'Traced roof: ${roofTrace!.areaM2.toStringAsFixed(1)} m². It fits ${roofTrace!.panels} panels (${roofTrace!.kwp.toStringAsFixed(2)} kWp).'),
         ]),
       ),
       _gap(),
@@ -784,6 +796,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final roofSqm = _num(roof);
     final warns = <String>[];
     if (roofSqm > 0 && r.roofSqm > roofSqm) warns.add('This system needs about ${r.roofSqm.round()} sq m of roof but you entered ${roofSqm.round()} sq m. Reduce the system or check the roof.');
+    if (roofTrace != null && o.panels > roofTrace!.panels) warns.add('The traced roof fits ${roofTrace!.panels} panels but this system needs ${o.panels}. Reduce the system, use higher-wattage panels or add another roof.');
     return [
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

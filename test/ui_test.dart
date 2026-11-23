@@ -11,6 +11,7 @@ import 'package:calculator/ui/service_space.dart';
 import 'package:calculator/main.dart' show Shell;
 import 'package:calculator/ui/sun_scene.dart';
 import 'package:calculator/core/bill_parse.dart';
+import 'package:calculator/core/roof.dart';
 import 'package:calculator/core/update.dart';
 import 'package:calculator/ui/theme.dart';
 import 'package:calculator/ui/update_dialog.dart';
@@ -349,6 +350,28 @@ void main() {
     expect(p.latestAmount, 1204);
     expect(p.found, true);
     expect(parseBillText('nothing useful here').found, false);
+  });
+
+  test('roof layout packs panels inside the outline and writes a DXF', () {
+    // a 10 m x 6 m roof
+    const roof = [Pt(0, 0), Pt(10, 0), Pt(10, 6), Pt(0, 6)];
+    expect(polygonArea(roof), closeTo(60, 1e-9));
+    final l = layoutPanels(roof, longMm: 2278, shortMm: 1134, gapMm: 25, rowGapMm: 450, setbackMm: 500);
+    expect(l.count, greaterThan(4));
+    for (final p in l.panels) {
+      for (final q in p) {
+        expect(pointInPolygon(q, roof), true);
+        expect(distToPolygonEdge(q, roof), greaterThanOrEqualTo(.5 - 1e-6));
+      }
+    }
+    final tight = layoutPanels(roof, longMm: 2278, shortMm: 1134, setbackMm: 3500);
+    expect(tight.count, 0);
+    expect(roofDxf(roof, l), contains('ROOF_BOUNDARY'));
+    final pr = RoofProjection(17.385, 78.4867);
+    final pt = pr.toLocal(17.3851, 78.4868);
+    final back = pr.toLatLon(pt);
+    expect(back.$1, closeTo(17.3851, 1e-9));
+    expect(back.$2, closeTo(78.4868, 1e-9));
   });
 
   test('critical load, surge, limits, BOM total and history signature', () {

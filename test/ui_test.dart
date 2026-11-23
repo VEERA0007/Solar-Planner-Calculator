@@ -10,6 +10,7 @@ import 'package:calculator/ui/service_level.dart';
 import 'package:calculator/ui/service_space.dart';
 import 'package:calculator/main.dart' show Shell;
 import 'package:calculator/ui/sun_scene.dart';
+import 'package:calculator/core/bill_parse.dart';
 import 'package:calculator/core/update.dart';
 import 'package:calculator/ui/theme.dart';
 import 'package:calculator/ui/update_dialog.dart';
@@ -332,6 +333,23 @@ void main() {
       await t.pumpWidget(const SizedBox());
     });
   }
+
+  test('bill text parser reads month rows, labels and USC', () {
+    const page = 'Consumer Name : A LAXMAN BABU\nUSC No: 110325672\nMonth Units Amount\nNov-2025 112 501.00\nDec 2025  116  535\nJan-26 114 518\n10/2026 98 1,204\nTotal Bill Amount : 1,204.00\nUnits Consumed: 98';
+    final p = parseBillText(page);
+    expect(p.usc, '110325672');
+    expect(p.name, 'A LAXMAN BABU');
+    expect(p.rows.length, 4);
+    expect(p.rows.first.month, 11);
+    expect(p.rows.first.year, 2025);
+    expect(p.rows.first.units, 112);
+    expect(p.rows.first.amount, 501);
+    expect(p.rows.last.units, 98);
+    expect(p.rows.last.amount, 1204);
+    expect(p.latestAmount, 1204);
+    expect(p.found, true);
+    expect(parseBillText('nothing useful here').found, false);
+  });
 
   test('critical load, surge, limits, BOM total and history signature', () {
     const items = [

@@ -90,3 +90,56 @@ class UscHistory {
 
 /// A USC (service connection) number is 8 to 12 digits depending on the DISCOM.
 bool plausibleUsc(String v) => RegExp(r'^\d{8,12}$').hasMatch(v);
+
+class InverterInfo {
+  final String name, series;
+  final double eff;
+  const InverterInfo(this.name, this.series, this.eff);
+}
+
+/// Typical peak efficiencies from public datasheets. Shown as starting points only.
+List<InverterInfo> inverterBrandInfo(SysType t) => switch (t) {
+      SysType.onGrid => const [
+          InverterInfo('Sungrow', 'SG RT/RS High-Current String', 98.5),
+          InverterInfo('Growatt', 'MIN / MID TL3-X Open Series', 98.4),
+          InverterInfo('GoodWe', 'DNS / SDT G3 Wide-MPPT', 98.3),
+          InverterInfo('Polycab', 'PSIS On-Grid 16A MPPT', 98.2),
+          InverterInfo('Deye', 'SUN-SG04LP3 High-Current', 97.8),
+          InverterInfo('Havells', 'Hybrid-BiDir Pro (DISCOM)', 97.6),
+          InverterInfo('Solis', 'S6 Pro Bidirectional HV/LV', 97.5),
+          InverterInfo('Loom Solar', 'Fusion Bi-Directional MPPT', 97.2),
+        ],
+      SysType.hybrid => const [
+          InverterInfo('Deye', 'SUN-SG Hybrid LV/HV', 97.6),
+          InverterInfo('Growatt', 'SPH / SPF Hybrid', 97.6),
+          InverterInfo('Solis', 'S6-EH1P Hybrid', 97.5),
+          InverterInfo('Sungrow', 'SH-RS Hybrid', 98.4),
+          InverterInfo('Luminous', 'NXT+ Solar Hybrid', 96.5),
+          InverterInfo('Microtek', 'Hybrid Solar PCU', 96.0),
+        ],
+      SysType.offGrid => const [
+          InverterInfo('Luminous', 'NXG / Solar PCU', 94.0),
+          InverterInfo('Microtek', 'Solar PCU Pro', 94.0),
+          InverterInfo('Su-Kam', 'Falcon Solar PCU', 93.5),
+          InverterInfo('Growatt', 'SPF Off-Grid', 93.0),
+          InverterInfo('Victron', 'MultiPlus-II', 96.0),
+          InverterInfo('Voltronic', 'Axpert MKS', 93.0),
+        ],
+    };
+
+/// Common inverter ratings near the array size, 4 closest around it.
+List<double> standardInverterSizes(double kwp) {
+  const all = [1.0, 1.5, 2.0, 3.0, 3.3, 3.6, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0];
+  final target = kwp * .95;
+  final sorted = [...all]..sort((a, b) => (a - target).abs().compareTo((b - target).abs()));
+  return (sorted.take(4).toList())..sort();
+}
+
+String dcAcAdvice(double kwp, double invKw) {
+  if (invKw <= 0) return '';
+  final r = kwp / invKw;
+  final t = r.toStringAsFixed(2);
+  if (r > 1.3) return 'DC/AC ratio $t is high. The inverter will clip at noon.';
+  if (r < .85) return 'DC/AC ratio $t leaves headroom for adding panels later or heavy surge loads.';
+  return 'Optimal DC/AC ratio ($t). ${invKw.toStringAsFixed(invKw == invKw.roundToDouble() ? 0 : 1)} kW AC pairs cleanly with ${kwp.toStringAsFixed(2)} kWp of panels for balanced peak harvesting and minimal clipping.';
+}

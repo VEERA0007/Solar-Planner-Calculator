@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/appliance_data.dart';
+import '../core/bill_parse.dart';
 import '../core/calc.dart';
 import '../core/estimator_data.dart';
+import '../core/service_data.dart';
 import '../core/store.dart';
+import 'bill_fetch.dart';
 import 'pdf_quote.dart';
 import 'theme.dart';
 
@@ -43,6 +46,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
   final phone = TextEditingController();
   final address = TextEditingController();
   final search = TextEditingController();
+  final exWp = TextEditingController(text: '550'), exQty = TextEditingController(), exInv = TextEditingController(), exGen = TextEditingController();
+  final customCost = TextEditingController();
+  String exArch = 'String inverter (Central MPPT)';
+  double? invOverride; // chosen inverter size in kW, null = the suggested size
+  String payMsg = '';
 
   AppState get s => widget.state;
 
@@ -65,7 +73,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   @override
   void dispose() {
-    for (final c in [units, bill, usc, roof, backup, inverterBrand, name, phone, address, search]) {
+    for (final c in [units, bill, usc, roof, backup, inverterBrand, name, phone, address, search, exWp, exQty, exInv, exGen, customCost]) {
       c.dispose();
     }
     super.dispose();
@@ -123,6 +131,8 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   LoadProfile get _profile => category == 'commercial' ? LoadProfile.commercial : (category == 'agricultural' ? LoadProfile.agricultural : LoadProfile.residential);
+
+  double invKw(SysOption o) => invOverride ?? o.invKw;
 
   Map<SysType, SysOption> _options(double u) {
     final daily = u / 30;
@@ -277,6 +287,32 @@ class _EstimatorPageState extends State<EstimatorPage> {
     setState(() {
       uscMsg = _hist == null ? 'No saved data for this USC yet. Enter the 13-month units from the bill.' : 'History found for this USC.';
       uscColor = C.amber;
+    });
+  }
+
+  /// Opens the DISCOM site in the app, then stores the units it read for this USC.
+  Future<void> _fetchBill() async {
+    final res = await Navigator.of(context).push<FetchedBill>(MaterialPageRoute(builder: (_) => BillFetchPage(state: s, usc: normalizeUsc(usc.text))));
+    if (res == null || !mounted) return;
+    final key = normalizeUsc(res.usc ?? usc.text);
+    if (key.isEmpty) {
+      toast(context, 'Units read. Enter the USC number to save them.');
+    }
+    final now = DateTime.now();
+    final start = now.year * 12 + now.month - 1 - 13;
+    final h = (key.isNotEmpty ? s.uscHistory[key] : null) ?? UscHistory();
+    res.unitsByKey.forEach((k, v) => h.units[k - start] = v);
+    if (res.latestUnits != null) h.units[12] = res.latestUnits;
+    h.at = now.millisecondsSinceEpoch;
+    setState(() {
+      if (key.isNotEmpty) {
+        usc.text = key;
+        s.uscHistory[key] = h;
+        s.saveUsc();
+      }
+      mode = 'usc';
+      uscMsg = 'Units read from the DISCOM page (${h.entered.length} months). Check them with Edit 13-month units.';
+      uscColor = C.green;
     });
   }
 
@@ -690,7 +726,17 @@ class _EstimatorPageState extends State<EstimatorPage> {
       ]),
       if (uscMsg.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text(uscMsg, style: TextStyle(color: uscColor, fontSize: 12.5))),
       const SizedBox(height: 10),
-      Text('Open the official bill site for ${s.st.name('en')}:', style: TextStyle(color: C.mute, fontSize: 12.5)),
+      FilledButton.icon(
+        key: const ValueKey('fetch-bill'),
+        onPressed: _fetchBill,
+        icon: const Icon(Icons.cloud_download_outlined, size: 18),
+        label: const Text('Fetch Govt Bill', style: TextStyle(fontWeight: FontWeight.w800)),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: C.orange),
+      ),
+      const SizedBox(height: 6),
+      Text('Opens the official ${s.st.name('en')} bill site here. Type the USC number, solve its captcha, open the bill and tap Read.', style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.3)),
+      const SizedBox(height: 10),
+      Text('Or open the official bill site outside the app:', style: TextStyle(color: C.mute, fontSize: 12.5)),
       const SizedBox(height: 6),
       Wrap(spacing: 8, runSpacing: 8, children: [
         for (final d in s.st.discoms) OutlinedButton.icon(onPressed: () => _open(d.url), icon: const Icon(Icons.open_in_new, size: 16), label: Text(d.name, style: const TextStyle(fontWeight: FontWeight.w800))),
@@ -719,9 +765,9 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ),
         const SizedBox(height: 4),
         Row(children: [Text(months.first, style: TextStyle(color: C.mute, fontSize: 11)), const Spacer(), Text(months.last, style: TextStyle(color: C.mute, fontSize: 11))]),
-        _note(Icons.fact_check_outlined, C.green, 'Average of ${h.entered.length} months you entered: ${h.average.round()} kWh/month. Entered by hand from the bills. The app does not fetch it from the DISCOM.'),
+        _note(Icons.fact_check_outlined, C.green, 'Average of ${h.entered.length} months you entered: ${h.average.round()} kWh/month. Read from the DISCOM page or entered by hand.'),
       ] else
-        _note(Icons.info_outline, C.blue, 'Live USC lookups are not possible: DISCOM portals need a login or captcha. Open the official site above, read the 13 months of units, and enter them here once. They are saved for this USC.'),
+        _note(Icons.info_outline, C.blue, 'Tap Fetch Govt Bill to read the units from the DISCOM site (you solve its captcha), or enter the 13 months of units by hand. They are saved for this USC.'),
     ];
   }
 
@@ -813,14 +859,55 @@ class _EstimatorPageState extends State<EstimatorPage> {
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _title(Icons.bolt, C.orange, 'Inverter Brand, Power & Engineering', '${o.invLabel} · ${o.threePhase ? '3-phase 415V' : '1-phase 230V'}'),
-          const SizedBox(height: 10),
-          TextField(controller: inverterBrand, decoration: const InputDecoration(labelText: 'Inverter brand', hintText: 'Type a brand (e.g. Sungrow, Havells)', isDense: true)),
+          const SizedBox(height: 12),
+          Text('INVERTER POWER (KW)', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12)),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
+            child: Row(children: [
+              Expanded(child: Text(_t(invKw(o)), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17))),
+              Text(invOverride == null ? 'Auto (${_t(o.invKw)} kW)' : 'Chosen', style: TextStyle(color: C.mute, fontSize: 12)),
+            ]),
+          ),
           const SizedBox(height: 8),
           Wrap(spacing: 8, runSpacing: 6, children: [
-            for (final b in kInverterBrands[o.type]!)
-              ActionChip(label: Text(b, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)), onPressed: () => setState(() => inverterBrand.text = b), visualDensity: VisualDensity.compact),
+            Text('Standard sizes:', style: TextStyle(color: C.mute, fontSize: 12.5)),
+            for (final k in standardInverterSizes(o.kwp))
+              GestureDetector(
+                onTap: () => setState(() => invOverride = k == o.invKw ? null : k),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                  decoration: BoxDecoration(color: (invOverride ?? o.invKw) == k ? C.orange : C.card2, borderRadius: BorderRadius.circular(12), border: Border.all(color: (invOverride ?? o.invKw) == k ? C.orange : C.line)),
+                  child: Text('${_t(k)} kW${k == o.invKw ? ' ★' : ''}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: (invOverride ?? o.invKw) == k ? Colors.white : C.text)),
+                ),
+              ),
           ]),
-          _note(Icons.tune, C.blue, inverterAdvice(o)),
+          _note(Icons.tune, C.green, '${dcAcAdvice(o.kwp, invKw(o))}\nSuggested range: ${_t(double.parse((o.kwp * .8).toStringAsFixed(1)))} to ${_t(double.parse((o.kwp * 1.1).toStringAsFixed(1)))} kW AC for ${o.kwp.toStringAsFixed(2)} kWp of panels.'),
+          const SizedBox(height: 12),
+          TextField(controller: inverterBrand, decoration: const InputDecoration(labelText: 'Inverter brand', hintText: 'Type a brand (e.g. Sungrow, Havells, Deye)', isDense: true)),
+          const SizedBox(height: 10),
+          Text('SUGGESTED ${o.type.label.toUpperCase()} INVERTERS (TAP TO SELECT)', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final b in inverterBrandInfo(o.type))
+              GestureDetector(
+                onTap: () => setState(() => inverterBrand.text = b.name),
+                child: Container(
+                  width: (MediaQuery.of(context).size.width - 28 - 36 - 8) / 2,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: inverterBrand.text == b.name ? C.chipSun : C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: inverterBrand.text == b.name ? C.orange : C.line)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [Expanded(child: Text(b.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14))), Text('${b.eff}%', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))]),
+                    const SizedBox(height: 2),
+                    Text(b.series, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 11)),
+                  ]),
+                ),
+              ),
+          ]),
+          const SizedBox(height: 6),
+          Text('Peak efficiencies are typical datasheet figures. Confirm model and availability with the supplier.', style: TextStyle(color: C.mute, fontSize: 11)),
         ]),
       ),
       _gap(),
@@ -980,6 +1067,27 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Want to know about your Payback period?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5)),
+          const SizedBox(height: 4),
+          Text('Add your installation cost and see how quickly you will start saving.', style: TextStyle(color: C.mute, fontSize: 12.5)),
+          const SizedBox(height: 10),
+          _field(customCost, 'Installation cost', prefix: '₹ '),
+          const SizedBox(height: 10),
+          _bigButton('Calculate', () {
+            final c = _num(customCost);
+            if (!(c > 0)) return toast(context, 'Enter the installation cost');
+            final i = s.input.copy()
+              ..costPerKw = c / r.kw
+              ..subsidy = false;
+            final x = calculate(i);
+            setState(() => payMsg = x.paybackYears == null ? 'Not paid back within ${x.years} years at this cost.' : 'Payback in ${fmt1(x.paybackYears!)} years. 25-year net gain ${rupee(x.lifetimeProfit)}.');
+          }),
+          if (payMsg.isNotEmpty) _note(Icons.hourglass_bottom, C.green, payMsg),
+        ]),
+      ),
+      _gap(),
       Row(children: [
         Expanded(child: OutlinedButton(onPressed: () => setState(() => stage = 1), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52), foregroundColor: C.text), child: const Text('Back to Results', style: TextStyle(fontWeight: FontWeight.w800)))),
         const SizedBox(width: 10),
@@ -1054,14 +1162,107 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   // ---------- Existing plant ----------
-  List<Widget> _existing() => [
-        Panel(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _title(Icons.health_and_safety_outlined, C.blue, 'Existing Plant Audit & Health', 'Performance ratio, expected vs actual generation and maintenance advice'),
-            _note(Icons.schedule, C.amber, 'This tab is planned for the next build. Use New Install and Generation for now.'),
+  List<Widget> _existing() {
+    final wp = _num(exWp), qty = _num(exQty), inv = _num(exInv), act = _num(exGen);
+    final kwp = wp * qty / 1000;
+    final y = s.locationYield;
+    final expected = kwp * y * 30;
+    final pr = expected > 0 && act > 0 ? act / expected * 100 : 0.0;
+    final ratio = inv > 0 ? kwp / inv : 0.0;
+    DateTime? lastWash;
+    for (final e in s.services) {
+      if (e.type == ServiceType.cleaning && (lastWash == null || e.date.isAfter(lastWash))) lastWash = e.date;
+    }
+    final recs = <(String, Color)>[];
+    if (kwp <= 0) {
+      recs.add(('Enter the panel wattage and quantity to start the audit.', C.amber));
+    } else if (act <= 0) {
+      recs.add(('Enter last month\'s generation (kWh) from the inverter or meter to get the performance ratio.', C.amber));
+    } else if (pr > 105) {
+      recs.add(('PR is ${pr.round()}%, which is above 100%. Re-check the capacity and the generation figure.', C.amber));
+    } else if (pr >= 75) {
+      recs.add(('System is operating within prime efficiency benchmarks (PR ≥ 75%). Continue scheduled quarterly wipe-downs.', C.green));
+    } else if (pr >= 60) {
+      recs.add(('PR is ${pr.round()}%, below the 75% benchmark. Check soiling, shade and loose connections, and clean the panels.', C.amber));
+    } else {
+      recs.add(('PR is only ${pr.round()}%. Inspect string voltage and current, inverter error logs and shading as soon as possible.', C.red));
+    }
+    if (ratio > 1.3) {
+      recs.add(('DC/AC ratio is ${ratio.toStringAsFixed(2)}, so the inverter will clip around noon. A larger inverter recovers that energy.', C.amber));
+    } else if (ratio > 0 && ratio < .8) {
+      recs.add(('DC/AC ratio is ${ratio.toStringAsFixed(2)}. The inverter is large for this array and runs at low load much of the day.', C.amber));
+    } else if (ratio > 0) {
+      recs.add(('Inverter conversion looks healthy with minimal clipping (DC/AC ${ratio.toStringAsFixed(2)}).', C.green));
+    }
+    if (lastWash == null) {
+      recs.add(('No cleaning is logged yet. Log washes in Service so soiling loss can be tracked.', C.blue));
+    } else {
+      final d = DateTime.now().difference(lastWash).inDays;
+      recs.add((d > 90 ? 'Last wash was $d days ago. Dust can cost 5 to 10% of output, so schedule a cleaning.' : 'Last wash was $d days ago. Cleaning is up to date.', d > 90 ? C.amber : C.green));
+    }
+    return [
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _title(Icons.health_and_safety_outlined, C.blue, 'Installed Equipment Specifications', 'Describe the plant to audit its performance'),
+          _gap(),
+          Row(children: [
+            Expanded(child: _field(exWp, 'Panel wattage', suffix: 'W')),
+            const SizedBox(width: 10),
+            Expanded(child: _field(exQty, 'Panel quantity', decimal: false)),
           ]),
-        ),
-      ];
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(child: Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13), decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.line)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Total capacity', style: TextStyle(color: C.mute, fontSize: 11.5)), Text('${kwp.toStringAsFixed(2)} kWp', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))]))),
+            const SizedBox(width: 10),
+            Expanded(child: _field(exInv, 'Inverter capacity', suffix: 'kW')),
+          ]),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(
+            initialValue: exArch,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Inverter architecture', isDense: true),
+            items: [for (final a in const ['String inverter (Central MPPT)', 'Micro-inverters', 'Power optimizers', 'Hybrid inverter', 'Off-grid PCU']) DropdownMenuItem(value: a, child: Text(a))],
+            onChanged: (v) => setState(() => exArch = v ?? exArch),
+          ),
+          const SizedBox(height: 10),
+          _field(exGen, 'Actual generation last month', suffix: 'kWh'),
+        ]),
+      ),
+      _gap(),
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('AUDIT', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: .5)),
+          const SizedBox(height: 10),
+          IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [_stat('EXPECTED / MONTH', '${expected.round()} kWh', sub: '${y.toStringAsFixed(1)} sun-hours/day'), _stat('ACTUAL', act > 0 ? '${act.round()} kWh' : '-', c: C.blue)])),
+          const SizedBox(height: 8),
+          IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [_stat('PERFORMANCE RATIO', pr > 0 ? '${pr.round()}%' : '-', c: pr >= 75 ? C.green : (pr > 0 ? C.amber : C.mute), sub: 'Benchmark 75%'), _stat('DC / AC RATIO', ratio > 0 ? ratio.toStringAsFixed(2) : '-', sub: 'Normal 0.9 to 1.3')])),
+        ]),
+      ),
+      _gap(),
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [Icon(Icons.fact_check_outlined, color: C.green, size: 20), const SizedBox(width: 8), const Expanded(child: Text('DIAGNOSTIC & MAINTENANCE RECOMMENDATIONS', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, letterSpacing: .3)))]),
+          const SizedBox(height: 10),
+          for (var i = 0; i < recs.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                CircleAvatar(radius: 11, backgroundColor: recs[i].$2.withValues(alpha: .18), child: Text('${i + 1}', style: TextStyle(color: recs[i].$2, fontWeight: FontWeight.w800, fontSize: 12))),
+                const SizedBox(width: 10),
+                Expanded(child: Text(recs[i].$1, style: const TextStyle(fontSize: 14, height: 1.35))),
+              ]),
+            ),
+          Text('Performance ratio uses the sun-hours of your location, so treat it as an estimate. Use the logger or meter data for a formal audit.', style: TextStyle(color: C.mute, fontSize: 11.5)),
+        ]),
+      ),
+      _gap(),
+      Row(children: [
+        Expanded(child: OutlinedButton(onPressed: () => s.setTab(0), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(52), foregroundColor: C.text), child: const Text('Dashboard', style: TextStyle(fontWeight: FontWeight.w800)))),
+        const SizedBox(width: 10),
+        Expanded(child: FilledButton(onPressed: () => s.setTab(4), style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52), backgroundColor: C.blue), child: const Text('Log Maintenance', style: TextStyle(fontWeight: FontWeight.w800)))),
+      ]),
+    ];
+  }
 
   // ---------- Generation ----------
   List<Widget> _generation() {

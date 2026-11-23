@@ -293,6 +293,46 @@ void main() {
     });
   }
 
+  for (final dark in [false, true]) {
+    testWidgets('estimator flow ${dark ? 'night' : 'day'} has no layout errors', (t) async {
+      SharedPreferences.setMockInitialValues({});
+      final s = AppState();
+      await t.runAsync(() => s.load());
+      s.prefs.dark = dark;
+      t.view.physicalSize = const Size(412, 3400);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(Harness(s));
+      await t.pump(const Duration(seconds: 1));
+      s.setTab(1);
+      await t.pump(const Duration(seconds: 1));
+      final n = dark ? 'night' : 'day';
+      expect(find.text('Solar Estimator'), findsWidgets);
+      await _shot(t, 'est-form-$n');
+      await t.tap(find.text('Calculate the Solar System'));
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      await _shot(t, 'est-results-$n');
+      await t.tap(find.text('ROI Dashboard'));
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      await _shot(t, 'est-roi-$n');
+      await t.tap(find.text('Full Savings Page'));
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      await _shot(t, 'est-page-$n');
+      await t.tap(find.text('Existing Plant'));
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      await _shot(t, 'est-existing-$n');
+      await t.tap(find.text('Generation'));
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      await _shot(t, 'est-generation-$n');
+      await t.pumpWidget(const SizedBox());
+    });
+  }
+
   test('critical load, surge, limits, BOM total and history signature', () {
     const items = [
       LoadItem('LED Bulb', 10, 10, 6, 18),

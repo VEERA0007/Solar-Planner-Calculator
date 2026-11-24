@@ -227,7 +227,6 @@ class AppState extends ChangeNotifier {
   int tab = 0;
   ApplCfg appl = ApplCfg();
   Rates rates = const Rates();
-  Map<String, UscHistory> uscHistory = {};
   List<ApplRecord> applHistory = [];
   /// Set by Appliance Analysis; the Estimator picks it up when it opens.
   EstimateInput? estimatePush;
@@ -271,8 +270,6 @@ class AppState extends ChangeNotifier {
       if (sv != null) services = sv.whereType<Map>().map((e) => ServiceEntry.fromJson(e.cast<String, dynamic>())).toList();
       final ap = obj('appl');
       if (ap != null) appl = ApplCfg.fromJson(ap);
-      final uh = obj('usc_hist');
-      if (uh != null) uscHistory = {for (final e in uh.entries) if (e.value is Map) e.key: UscHistory.fromJson((e.value as Map).cast<String, dynamic>())};
       final rt = obj('appl_rates');
       if (rt != null) rates = Rates.fromJson(rt);
       final ah = list('appl_hist');
@@ -323,7 +320,6 @@ class AppState extends ChangeNotifier {
   void saveSite() { _save('site', site.toJson()); notifyListeners(); }
   void saveBrand() { _save('brand', brand.toJson()); notifyListeners(); }
   void saveAppl() { _save('appl', appl.toJson()); notifyListeners(); }
-  void saveUsc() { _save('usc_hist', uscHistory.map((k, v) => MapEntry(k, v.toJson()))); notifyListeners(); }
   void saveRates() { _save('appl_rates', rates.toJson()); notifyListeners(); }
   void saveApplHistory() {
     if (applHistory.length > 100) applHistory = applHistory.sublist(0, 100);
@@ -495,7 +491,6 @@ class AppState extends ChangeNotifier {
     appliances = _defaultAppliances();
     appl = ApplCfg();
     rates = const Rates();
-    uscHistory = {};
     applHistory = [];
     estimatePush = null;
     lastCleaned = null;

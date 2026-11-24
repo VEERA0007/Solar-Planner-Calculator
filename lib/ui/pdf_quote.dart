@@ -53,7 +53,7 @@ Future<Uint8List> buildQuotePdf(Customer c, EstimateResult r, Brand brand) async
         child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
           section('Customer'),
           kv('Name', c.name.isEmpty ? '-' : c.name),
-          kv('USC number', c.usc.isEmpty ? '-' : c.usc),
+          if (c.usc.isNotEmpty) kv('Service number', c.usc),
           kv('Phone', c.phone.isEmpty ? '-' : c.phone),
           kv('Location', c.address.isEmpty ? '-' : c.address),
           section('Proposed system'),

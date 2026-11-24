@@ -6,7 +6,6 @@ import '../core/calc.dart';
 import '../core/estimator_data.dart';
 import '../core/service_data.dart';
 import '../core/store.dart';
-import 'bill_fetch.dart';
 import 'pdf_quote.dart';
 import 'roof_map.dart';
 import 'theme.dart';
@@ -23,7 +22,7 @@ class EstimatorPage extends StatefulWidget {
 class _EstimatorPageState extends State<EstimatorPage> {
   int tab = 0; // 0 New Install, 1 Existing Plant, 2 Generation
   int stage = 0; // 0 form, 1 results, 2 ROI, 3 customer page, 4 saved
-  String mode = 'units'; // units | bill | usc
+  String mode = 'units'; // units | bill
   String category = 'residential';
   bool dcr = true;
   SysType sys = SysType.onGrid;
@@ -33,12 +32,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
   double escalation = 3, omPct = 1;
   bool yearly = false;
   Map<SysType, SysOption> opts = {};
-  String uscMsg = '';
-  Color uscColor = C.mute;
+  bool slabOpen = false;
 
   final units = TextEditingController(text: '400');
   final bill = TextEditingController();
-  final usc = TextEditingController();
   final roof = TextEditingController();
   final backup = TextEditingController();
   final inverterBrand = TextEditingController();
@@ -59,7 +56,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
   void initState() {
     super.initState();
     final p = s.profile;
-    usc.text = p.serviceNo;
     name.text = p.name;
     phone.text = p.mobile;
     address.text = p.address;
@@ -74,7 +70,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   @override
   void dispose() {
-    for (final c in [units, bill, usc, roof, backup, inverterBrand, name, phone, address, search, exWp, exQty, exInv, exGen, customCost]) {
+    for (final c in [units, bill, roof, backup, inverterBrand, name, phone, address, search, exWp, exQty, exInv, exGen, customCost]) {
       c.dispose();
     }
     super.dispose();
@@ -97,7 +93,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
   void _fill(EstimateInput d) {
     mode = 'units';
     units.text = _t(d.monthlyUnits.round());
-    category = const ['residential', 'commercial', 'agricultural'].contains(d.category) ? d.category : 'residential';
+    category = const ['residential', 'commercial', 'industrial', 'agricultural'].contains(d.category) ? d.category : 'residential';
     dcr = d.dcr;
     sys = SysType.values[d.sys.clamp(0, 2)];
     backup.text = d.backupHours > 0 ? _t(d.backupHours) : '';
@@ -113,14 +109,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   double _num(TextEditingController c) => double.tryParse(c.text.trim().replaceAll(',', '')) ?? 0;
 
-  UscHistory? get _hist => s.uscHistory[normalizeUsc(usc.text)];
-
   double get _monthlyUnits {
     switch (mode) {
       case 'bill':
         return s.tariffCat.unitsForBill(_num(bill));
-      case 'usc':
-        return _hist?.average ?? 0;
       default:
         return _num(units);
     }
@@ -131,7 +123,12 @@ class _EstimatorPageState extends State<EstimatorPage> {
     return l[panelIdx.clamp(0, l.length - 1)];
   }
 
-  LoadProfile get _profile => category == 'commercial' ? LoadProfile.commercial : (category == 'agricultural' ? LoadProfile.agricultural : LoadProfile.residential);
+  LoadProfile get _profile => switch (category) {
+        'commercial' => LoadProfile.commercial,
+        'industrial' => LoadProfile.industrial,
+        'agricultural' => LoadProfile.agricultural,
+        _ => LoadProfile.residential,
+      };
 
   double invKw(SysOption o) => invOverride ?? o.invKw;
 
@@ -155,13 +152,13 @@ class _EstimatorPageState extends State<EstimatorPage> {
     };
   }
 
-  Customer _readCustomer() => Customer(usc: normalizeUsc(usc.text), name: name.text.trim(), phone: phone.text.trim(), address: address.text.trim());
+  Customer _readCustomer() => Customer(name: name.text.trim(), phone: phone.text.trim(), address: address.text.trim());
 
   /// Builds the three options and the savings result. [go] opens the results page.
   void _calc({bool go = true}) {
     final u = _monthlyUnits;
     if (!(u > 0)) {
-      if (go) toast(context, mode == 'usc' ? 'Enter the 13-month units for this USC first' : 'Enter monthly units or bill');
+      if (go) toast(context, 'Enter monthly units or bill');
       return;
     }
     final plan = s.tariffCat;
@@ -207,15 +204,15 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final r = s.result;
     if (r == null) return;
     final c = _readCustomer();
-    if (c.usc.isEmpty && c.name.isEmpty) {
-      toast(context, 'Add a USC number or customer name first (Customer details on the Estimate page)');
+    if (c.name.isEmpty) {
+      toast(context, 'Add the customer name first (Customer details on the Estimate page)');
       setState(() {
         stage = 0;
         custOpen = true;
       });
       return;
     }
-    final idx = c.usc.isNotEmpty ? s.records.indexWhere((x) => normalizeUsc(x.customer.usc) == c.usc && x.customer.name == c.name) : -1;
+    final idx = s.records.indexWhere((x) => x.customer.name == c.name && x.customer.phone == c.phone);
     final rec = SavedRecord(
       id: idx >= 0 ? s.records[idx].id : DateTime.now().millisecondsSinceEpoch.toString(),
       savedAt: DateTime.now().millisecondsSinceEpoch,
@@ -244,77 +241,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   void _load(SavedRecord r) {
-    usc.text = r.customer.usc;
     name.text = r.customer.name;
     phone.text = r.customer.phone;
     address.text = r.customer.address;
     _fill(r.input);
-  }
-
-  void _uscChanged(String _) {
-    final v = normalizeUsc(usc.text);
-    setState(() {
-      if (v.isEmpty) {
-        uscMsg = '';
-      } else if (plausibleUsc(v)) {
-        uscMsg = 'Valid USC format (${v.length} digits).';
-        uscColor = C.green;
-      } else {
-        uscMsg = 'USC numbers are 8 to 12 digits. Check the number on the bill.';
-        uscColor = C.amber;
-      }
-    });
-  }
-
-  void _uscSearch() {
-    final v = normalizeUsc(usc.text);
-    if (v.isEmpty) {
-      setState(() {
-        uscMsg = 'Enter a USC number to search.';
-        uscColor = C.amber;
-      });
-      return;
-    }
-    final exact = s.records.where((r) => normalizeUsc(r.customer.usc) == v).toList()..sort((a, b) => b.savedAt.compareTo(a.savedAt));
-    if (exact.isNotEmpty) {
-      _load(exact.first);
-      setState(() {
-        uscMsg = 'Found a saved estimate for ${exact.first.customer.name.isEmpty ? 'this USC' : exact.first.customer.name} (${exact.length} saved). Details filled in.';
-        uscColor = C.green;
-      });
-      toast(context, 'USC found, details loaded');
-      return;
-    }
-    setState(() {
-      uscMsg = _hist == null ? 'No saved data for this USC yet. Enter the 13-month units from the bill.' : 'History found for this USC.';
-      uscColor = C.amber;
-    });
-  }
-
-  /// Opens the DISCOM site in the app, then stores the units it read for this USC.
-  Future<void> _fetchBill() async {
-    final res = await Navigator.of(context).push<FetchedBill>(MaterialPageRoute(builder: (_) => BillFetchPage(state: s, usc: normalizeUsc(usc.text))));
-    if (res == null || !mounted) return;
-    final key = normalizeUsc(res.usc ?? usc.text);
-    if (key.isEmpty) {
-      toast(context, 'Units read. Enter the USC number to save them.');
-    }
-    final now = DateTime.now();
-    final start = now.year * 12 + now.month - 1 - 13;
-    final h = (key.isNotEmpty ? s.uscHistory[key] : null) ?? UscHistory();
-    res.unitsByKey.forEach((k, v) => h.units[k - start] = v);
-    if (res.latestUnits != null) h.units[12] = res.latestUnits;
-    h.at = now.millisecondsSinceEpoch;
-    setState(() {
-      if (key.isNotEmpty) {
-        usc.text = key;
-        s.uscHistory[key] = h;
-        s.saveUsc();
-      }
-      mode = 'usc';
-      uscMsg = 'Units read from the DISCOM page (${h.entered.length} months). Check them with Edit 13-month units.';
-      uscColor = C.green;
-    });
   }
 
   Future<void> _openRoofMap() async {
@@ -324,19 +254,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
       roofTrace = r;
       roof.text = r.areaM2.round().toString();
     });
-  }
-
-  Future<void> _editHistory() async {
-    final v = normalizeUsc(usc.text);
-    if (v.isEmpty) return toast(context, 'Enter the USC number first');
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: C.card,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
-      builder: (_) => _UscSheet(state: s, usc: v),
-    );
-    if (mounted) setState(() {});
   }
 
   // ---------- small building blocks ----------
@@ -529,19 +446,17 @@ class _EstimatorPageState extends State<EstimatorPage> {
     return [
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter units, a bill amount, or use the USC history'),
+          _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter your monthly units or a bill amount'),
           _gap(),
           Text('Monthly Consumption', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 13)),
           const SizedBox(height: 8),
           Row(children: [
             _chip('Units (kWh)', mode == 'units', () => setState(() => mode = 'units')),
             _chip('Bill (₹)', mode == 'bill', () => setState(() => mode = 'bill')),
-            _chip('USC Number', mode == 'usc', () => setState(() => mode = 'usc')),
           ]),
           const SizedBox(height: 12),
           if (mode == 'units') _field(units, 'Units / Month (kWh)'),
           if (mode == 'bill') _field(bill, 'Bill / Month (energy charges)', prefix: '₹ '),
-          if (mode == 'usc') ..._uscBlock(),
           if (u > 0) ...[
             Container(
               margin: const EdgeInsets.only(top: 12),
@@ -555,10 +470,19 @@ class _EstimatorPageState extends State<EstimatorPage> {
                   const SizedBox(height: 4),
                   Text('Suggested: ${quick.kwp.toStringAsFixed(2)} kWp (${quick.panels} × ${_panel.wp}W)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 14)),
                 ],
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: () => setState(() => slabOpen = !slabOpen),
+                  child: Row(children: [
+                    Text(slabOpen ? 'Hide bill working' : 'How was this bill worked out?', style: TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                    Icon(slabOpen ? Icons.expand_less : Icons.expand_more, color: C.blue, size: 18),
+                  ]),
+                ),
+                if (slabOpen) ..._slabLines(plan, u),
               ]),
             ),
           ],
-          if (mode != 'usc') ...[
+          ...[
             const SizedBox(height: 12),
             Row(children: [
               for (final q in const [250, 400, 600])
@@ -660,7 +584,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
               Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
             ])
           else
-            Text('Enter units, a bill or a USC history above.', style: TextStyle(color: C.mute)),
+            Text('Enter units or a bill above.', style: TextStyle(color: C.mute)),
           _gap(),
           Row(children: [
             CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('1', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
@@ -671,7 +595,8 @@ class _EstimatorPageState extends State<EstimatorPage> {
           Row(children: [
             _chip('Residential', category == 'residential', () => setState(() => category = 'residential'), sub: 'Open Capex'),
             _chip('Commercial', category == 'commercial', () => setState(() => category = 'commercial'), sub: 'Lower Cost'),
-            _chip('Agricultural', category == 'agricultural', () => setState(() => category = 'agricultural'), sub: 'Captive'),
+            _chip('Industrial', category == 'industrial', () => setState(() => category = 'industrial'), sub: 'Plant'),
+            _chip('Agricultural', category == 'agricultural', () => setState(() => category = 'agricultural'), sub: 'Pumps'),
           ]),
           _gap(),
           Row(children: [
@@ -715,70 +640,46 @@ class _EstimatorPageState extends State<EstimatorPage> {
             TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone', isDense: true)),
             const SizedBox(height: 10),
             TextField(controller: address, decoration: const InputDecoration(labelText: 'Address / location', isDense: true)),
-            if (mode != 'usc') ...[
-              const SizedBox(height: 10),
-              TextField(controller: usc, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'USC number (optional)', isDense: true)),
-            ],
           ],
         ]),
       ),
     ];
   }
 
-  List<Widget> _uscBlock() {
-    final h = _hist;
-    final months = last13Months(DateTime.now());
-    final maxV = h == null || h.entered.isEmpty ? 1.0 : h.entered.reduce((a, b) => a > b ? a : b);
-    return [
-      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(child: TextField(controller: usc, keyboardType: TextInputType.number, onChanged: _uscChanged, onSubmitted: (_) => _uscSearch(), decoration: const InputDecoration(labelText: 'Unique Service Number (USC No.)', isDense: true))),
-        const SizedBox(width: 8),
-        FilledButton(onPressed: _uscSearch, style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.orange), child: const Text('Check')),
-      ]),
-      if (uscMsg.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text(uscMsg, style: TextStyle(color: uscColor, fontSize: 12.5))),
-      const SizedBox(height: 10),
-      FilledButton.icon(
-        key: const ValueKey('fetch-bill'),
-        onPressed: _fetchBill,
-        icon: const Icon(Icons.cloud_download_outlined, size: 18),
-        label: const Text('Fetch Govt Bill', style: TextStyle(fontWeight: FontWeight.w800)),
-        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48), backgroundColor: C.orange),
-      ),
-      const SizedBox(height: 6),
-      Text('Opens the official ${s.st.name('en')} bill site here. Type the USC number, solve its captcha, open the bill and tap Read.', style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.3)),
-      const SizedBox(height: 10),
-      Text('Or open the official bill site outside the app:', style: TextStyle(color: C.mute, fontSize: 12.5)),
-      const SizedBox(height: 6),
-      Wrap(spacing: 8, runSpacing: 8, children: [
-        for (final d in s.st.discoms) OutlinedButton.icon(onPressed: () => _open(d.url), icon: const Icon(Icons.open_in_new, size: 16), label: Text(d.name, style: const TextStyle(fontWeight: FontWeight.w800))),
-      ]),
-      const SizedBox(height: 10),
-      FilledButton.icon(
-        onPressed: _editHistory,
-        icon: const Icon(Icons.edit_calendar_outlined, size: 18),
-        label: Text(h == null || h.entered.isEmpty ? 'Enter 13-month units' : 'Edit 13-month units', style: const TextStyle(fontWeight: FontWeight.w800)),
-        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46), backgroundColor: C.blue),
-      ),
-      if (h != null && h.entered.isNotEmpty) ...[
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 70,
-          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            for (var i = 0; i < 13; i++)
-              Expanded(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                  height: ((h.units[i] ?? 0) / maxV * 64).clamp(2, 64).toDouble(),
-                  decoration: BoxDecoration(color: h.units[i] == null ? C.line : C.green, borderRadius: BorderRadius.circular(3)),
-                ),
-              ),
+  /// One line per tariff slab so the customer can follow the bill.
+  List<Widget> _slabLines(CategoryTariff plan, double u) {
+    final sch = plan.scheduleFor(u);
+    final rows = <Widget>[];
+    var left = u, prev = 0.0, total = 0.0;
+    for (final sl in sch.slabs) {
+      final cap = sl.upTo == null ? double.infinity : sl.upTo! - prev;
+      final take = left < cap ? left : cap;
+      if (take > 0) {
+        final amt = take * sl.rate;
+        total += amt;
+        rows.add(Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(children: [
+            Expanded(child: Text('${prev.round()}-${sl.upTo == null ? u.round() : sl.upTo!.round()} units: ${_t(double.parse(take.toStringAsFixed(1)))} × ₹${sl.rate.toStringAsFixed(2)}', style: TextStyle(color: C.mute, fontSize: 12.5))),
+            Text('₹${groupIndian(amt)}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
           ]),
-        ),
-        const SizedBox(height: 4),
-        Row(children: [Text(months.first, style: TextStyle(color: C.mute, fontSize: 11)), const Spacer(), Text(months.last, style: TextStyle(color: C.mute, fontSize: 11))]),
-        _note(Icons.fact_check_outlined, C.green, 'Average of ${h.entered.length} months you entered: ${h.average.round()} kWh/month. Read from the DISCOM page or entered by hand.'),
-      ] else
-        _note(Icons.info_outline, C.blue, 'Tap Fetch Govt Bill to read the units from the DISCOM site (you solve its captcha), or enter the 13 months of units by hand. They are saved for this USC.'),
+        ));
+      }
+      left -= take;
+      prev = sl.upTo ?? prev;
+      if (left <= 0) break;
+    }
+    return [
+      ...rows,
+      Divider(height: 14, color: C.line),
+      Row(children: [
+        const Expanded(child: Text('Energy charges', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5))),
+        Text('₹${groupIndian(total)}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+      ]),
+      Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text('Fixed charges, electricity duty and fuel surcharge are not included, so your printed bill will be higher. Rates: ${s.st.order}.', style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
+      ),
     ];
   }
 
@@ -796,6 +697,13 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final warns = <String>[];
     if (roofSqm > 0 && r.roofSqm > roofSqm) warns.add('This system needs about ${r.roofSqm.round()} sq m of roof but you entered ${roofSqm.round()} sq m. Reduce the system or check the roof.');
     if (roofTrace != null && o.panels > roofTrace!.panels) warns.add('The traced roof fits ${roofTrace!.panels} panels but this system needs ${o.panels}. Reduce the system, use higher-wattage panels or add another roof.');
+    final needKw = (r.monthlyUnits / 30) / (s.locationYield > 0.5 ? s.locationYield : 3.5);
+    if (o.kwp > needKw * 1.25 + 0.55) {
+      warns.add('This system (${o.kwp.toStringAsFixed(2)} kWp) is much bigger than the usage needs (about ${needKw.toStringAsFixed(2)} kWp for ${r.monthlyUnits.round()} units a month). A smaller system will pay back faster.');
+    }
+    if (r.paybackYears == null || r.paybackYears! > 12) {
+      warns.add(r.paybackYears == null ? 'This system does not pay back within ${r.years} years at this usage. Check the units entered or try On-Grid.' : 'Payback is ${r.paybackYears!.toStringAsFixed(1)} years. Low usage or battery cost stretches it. On-Grid is usually quickest.');
+    }
     return [
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1351,19 +1259,18 @@ class _EstimatorPageState extends State<EstimatorPage> {
   List<Widget> _saved() {
     final s = widget.state;
     final q = search.text.trim();
-    final qn = normalizeUsc(q);
     final ql = q.toLowerCase();
     final rows = q.isEmpty
         ? s.records
         : s.records.where((r) {
             final c = r.customer;
-            return normalizeUsc(c.usc).contains(qn) || [c.name, c.phone, c.address].any((x) => x.toLowerCase().contains(ql));
+            return [c.name, c.phone, c.address].any((x) => x.toLowerCase().contains(ql));
           }).toList();
     return [
       TextField(
         controller: search,
         onChanged: (_) => setState(() {}),
-        decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search by USC number, name, phone or address'),
+        decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search by name, phone or address'),
       ),
       const SizedBox(height: 12),
       if (rows.isEmpty)
@@ -1392,7 +1299,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(c.name.isEmpty ? 'Unnamed customer' : c.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
           const SizedBox(height: 2),
-          Text('USC ${c.usc.isEmpty ? '-' : c.usc} · ${c.phone.isEmpty ? 'no phone' : c.phone}${c.address.isEmpty ? '' : '\n${c.address}'}', style: TextStyle(color: C.mute, fontSize: 12.5)),
+          Text('${c.phone.isEmpty ? 'No phone' : c.phone}${c.address.isEmpty ? '' : '\n${c.address}'}', style: TextStyle(color: C.mute, fontSize: 12.5)),
           const SizedBox(height: 8),
           Text('${fmt1(r.kw)} kW · ${r.panels} panels · Net ${inr(r.netCost)} · Payback ${r.paybackYears == null ? '-' : '${fmt1(r.paybackYears!)} yrs'}', style: const TextStyle(fontSize: 13.5)),
           const SizedBox(height: 10),
@@ -1439,11 +1346,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   Future<void> _copyCsv(AppState s) async {
     String q(String v) => '"${v.replaceAll('"', '""')}"';
-    final lines = <String>[['USC', 'Name', 'Phone', 'Address', 'kW', 'Panels', 'Net cost (Rs)', 'Payback (yrs)'].map(q).join(',')];
+    final lines = <String>[['Name', 'Phone', 'Address', 'kW', 'Panels', 'Net cost (Rs)', 'Payback (yrs)'].map(q).join(',')];
     for (final rec in s.records) {
       final r = rec.result;
       lines.add([
-        rec.customer.usc,
         rec.customer.name,
         rec.customer.phone,
         rec.customer.address,
@@ -1456,72 +1362,4 @@ class _EstimatorPageState extends State<EstimatorPage> {
     await Clipboard.setData(ClipboardData(text: lines.join('\n')));
     if (mounted) toast(context, 'CSV copied. Paste it into Excel or a message.');
   }
-}
-
-/// Sheet to enter the 13 monthly unit readings of one USC.
-class _UscSheet extends StatefulWidget {
-  final AppState state;
-  final String usc;
-  const _UscSheet({required this.state, required this.usc});
-  @override
-  State<_UscSheet> createState() => _UscSheetState();
-}
-
-class _UscSheetState extends State<_UscSheet> {
-  late final List<TextEditingController> c;
-  late final List<String> months;
-
-  @override
-  void initState() {
-    super.initState();
-    months = last13Months(DateTime.now());
-    final h = widget.state.uscHistory[widget.usc];
-    c = [for (var i = 0; i < 13; i++) TextEditingController(text: h?.units[i] == null ? '' : h!.units[i]!.round().toString())];
-  }
-
-  @override
-  void dispose() {
-    for (final x in c) {
-      x.dispose();
-    }
-    super.dispose();
-  }
-
-  void _save() {
-    final h = UscHistory(units: [for (final x in c) double.tryParse(x.text.trim())], at: DateTime.now().millisecondsSinceEpoch);
-    if (h.entered.isEmpty) {
-      widget.state.uscHistory.remove(widget.usc);
-    } else {
-      widget.state.uscHistory[widget.usc] = h;
-    }
-    widget.state.saveUsc();
-    Navigator.pop(context);
-  }
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: EdgeInsets.fromLTRB(18, 16, 18, 16 + MediaQuery.of(context).viewInsets.bottom),
-        child: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(child: Text('13-month units · USC ${widget.usc}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800))),
-              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
-            ]),
-            Text('Enter units (kWh) from the customer bills or the DISCOM site. Leave a month empty if it is not known.', style: TextStyle(color: C.mute, fontSize: 12.5)),
-            const SizedBox(height: 12),
-            Wrap(runSpacing: 10, children: [
-              for (var i = 0; i < 13; i++)
-                FractionallySizedBox(
-                  widthFactor: .5,
-                  child: Padding(
-                    padding: EdgeInsets.only(right: i.isEven ? 8 : 0, left: i.isEven ? 0 : 0),
-                    child: TextField(controller: c[i], keyboardType: TextInputType.number, decoration: InputDecoration(labelText: months[i], suffixText: 'kWh', isDense: true)),
-                  ),
-                ),
-            ]),
-            const SizedBox(height: 16),
-            SizedBox(width: double.infinity, child: FilledButton(onPressed: _save, style: FilledButton.styleFrom(backgroundColor: C.orange, padding: const EdgeInsets.symmetric(vertical: 15)), child: const Text('Save units', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)))),
-          ]),
-        ),
-      );
 }

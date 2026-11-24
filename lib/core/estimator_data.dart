@@ -59,38 +59,6 @@ EnergyFlow energyFlow({required double monthlyGen, required double monthlyUse, r
   return EnergyFlow(self, exp, imp, value, value * 12);
 }
 
-/// The last 13 months (oldest first), ending with last month.
-List<String> last13Months(DateTime now) {
-  const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return [
-    for (var k = 13; k >= 1; k--)
-      () {
-        final d = DateTime(now.year, now.month - k, 1);
-        return '${mo[d.month - 1]} ${d.year % 100}';
-      }()
-  ];
-}
-
-/// Units typed in from the customer's bills, kept per USC number.
-class UscHistory {
-  List<double?> units; // 13 entries, null = not entered
-  int at;
-  UscHistory({List<double?>? units, this.at = 0}) : units = units ?? List<double?>.filled(13, null);
-  List<double> get entered => [for (final u in units) if (u != null && u > 0) u];
-  double get average => entered.isEmpty ? 0 : entered.reduce((a, b) => a + b) / entered.length;
-  Map<String, dynamic> toJson() => {'u': units, 'at': at};
-  factory UscHistory.fromJson(Map<String, dynamic> j) {
-    final raw = (j['u'] as List?) ?? const [];
-    return UscHistory(
-      units: [for (var i = 0; i < 13; i++) i < raw.length && raw[i] is num ? (raw[i] as num).toDouble() : null],
-      at: (j['at'] as num?)?.toInt() ?? 0,
-    );
-  }
-}
-
-/// A USC (service connection) number is 8 to 12 digits depending on the DISCOM.
-bool plausibleUsc(String v) => RegExp(r'^\d{8,12}$').hasMatch(v);
-
 class InverterInfo {
   final String name, series;
   final double eff;

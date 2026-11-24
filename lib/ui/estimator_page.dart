@@ -6,6 +6,7 @@ import '../core/calc.dart';
 import '../core/estimator_data.dart';
 import '../core/service_data.dart';
 import '../core/store.dart';
+import '../core/tariff.dart';
 import 'pdf_quote.dart';
 import 'roof_map.dart';
 import 'theme.dart';

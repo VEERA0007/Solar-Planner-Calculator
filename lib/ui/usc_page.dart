@@ -61,7 +61,7 @@ class _UscPageState extends State<UscPage> {
     });
     try {
       final r = await widget.source.fetch(
-        usc: normalizeUsc(usc.text),
+        usc: cleanUscNumber(usc.text),
         discom: d,
         captcha: needsCaptcha ? captcha.text.trim() : null,
       );

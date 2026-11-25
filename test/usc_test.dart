@@ -44,7 +44,7 @@ void main() {
     });
 
     test('normalizes spaces', () {
-      expect(normalizeUsc(' 1103 2567 '), '11032567');
+      expect(cleanUscNumber(' 1103 2567 '), '11032567');
     });
   });
 

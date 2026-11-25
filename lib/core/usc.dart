@@ -60,7 +60,7 @@ String? validateUsc(String raw) {
   return null;
 }
 
-String normalizeUsc(String raw) => raw.replaceAll(RegExp(r'\s'), '');
+String cleanUscNumber(String raw) => raw.replaceAll(RegExp(r'\s'), '');
 
 /// One billing month as returned by the portal.
 class UscMonth {

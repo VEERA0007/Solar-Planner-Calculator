@@ -121,8 +121,8 @@ Widget _app(UscSource source, {bool dark = false}) => RepaintBoundary(
       ),
     );
 
-void _phone(WidgetTester t) {
-  t.view.physicalSize = const Size(400 * 2.5, 860 * 2.5);
+void _phone(WidgetTester t, {double height = 860}) {
+  t.view.physicalSize = Size(400 * 2.5, height * 2.5);
   t.view.devicePixelRatio = 2.5;
   addTearDown(t.view.reset);
 }
@@ -136,7 +136,7 @@ void main() {
   });
 
   testWidgets('usc section: form, then sample result with ledger', (t) async {
-    _phone(t);
+    _phone(t, height: 2600);
     await t.pumpWidget(_app(_SampleSource()));
     await t.pumpAndSettle();
     await _shot(t, 'usc-a-form-empty');

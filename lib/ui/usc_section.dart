@@ -184,7 +184,8 @@ class _UscSectionState extends State<UscSection> {
         if (_validUsc && discom != null) ...[
           const SizedBox(height: 10),
           Text.rich(TextSpan(style: TextStyle(fontSize: 13, color: C.mute, height: 1.4), children: [
-            TextSpan(text: '✓ Valid USC format', style: TextStyle(color: C.green, fontWeight: FontWeight.w800)),
+            WidgetSpan(alignment: PlaceholderAlignment.middle, child: Icon(Icons.check, size: 15, color: C.green)),
+            TextSpan(text: ' Valid USC format', style: TextStyle(color: C.green, fontWeight: FontWeight.w800)),
             TextSpan(text: ' · ${cleanUscNumber(usc.text).length}-digit USC No matched ${discom!.region.label} (${discom!.code}) · USC Number (Unique Service 8-12 digits)'),
           ])),
         ],
@@ -258,6 +259,9 @@ class _UscSectionState extends State<UscSection> {
                 Text('Live Sync: ${_stamp(r.fetchedAt)} IST', style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 12.5)),
               ]),
             ),
+          ]),
+          const SizedBox(height: 10),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
             IconButton(
               tooltip: 'Fetch again',
               onPressed: () => _rerun(r),

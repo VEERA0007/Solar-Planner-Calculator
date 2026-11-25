@@ -45,7 +45,28 @@ class _UscSectionState extends State<UscSection> {
     super.dispose();
   }
 
-  bool get _validUsc => validateUsc(usc.text) == null;
+  bool get _validUsc => validateUsc(usc.text, discom: discom) == null;
+
+  /// Matches the typed number to a DISCOM by its confirmed length rule.
+  /// Sets the state and DISCOM when one rule matches; otherwise asks the user to choose.
+  void _onNumberChanged() {
+    final candidates = detectDiscoms(usc.text);
+    setState(() {
+      error = null;
+      if (candidates.length == 1 && candidates.first != discom) {
+        final d = candidates.first;
+        region = d.region;
+        discom = d;
+        result = null;
+        captcha.clear();
+        notice = 'Matched ${d.region.label} (${d.code}) by USC length.';
+      } else if (candidates.length > 1 && (discom == null || !candidates.contains(discom))) {
+        notice = 'This length fits ${candidates.map((d) => d.code).join(' or ')}. Choose one.';
+      } else {
+        notice = null;
+      }
+    });
+  }
 
   Future<void> _fetch() async {
     final d = discom;
@@ -53,7 +74,7 @@ class _UscSectionState extends State<UscSection> {
       setState(() => error = 'Choose a state and DISCOM first');
       return;
     }
-    final problem = validateUsc(usc.text);
+    final problem = validateUsc(usc.text, discom: d);
     if (problem != null) {
       setState(() => error = problem);
       return;
@@ -85,6 +106,7 @@ class _UscSectionState extends State<UscSection> {
       setState(() {
         busy = false;
         error = e.message;
+        captcha.clear();
       });
     } catch (_) {
       if (!mounted) return;
@@ -148,10 +170,7 @@ class _UscSectionState extends State<UscSection> {
           final field = TextField(
             controller: usc,
             keyboardType: TextInputType.number,
-            onChanged: (_) => setState(() {
-              error = null;
-              notice = null;
-            }),
+            onChanged: (_) => _onNumberChanged(),
             decoration: InputDecoration(
               hintText: 'Enter USC number',
               isDense: true,
@@ -175,11 +194,24 @@ class _UscSectionState extends State<UscSection> {
           return Row(children: [Expanded(child: field), const SizedBox(width: 10), button]);
         }),
         if (discom != null && widget.source.needsCaptcha(discom!)) ...[
-          const SizedBox(height: 10),
-          TextField(
-            controller: captcha,
-            decoration: InputDecoration(labelText: 'Captcha from ${discom!.code}', hintText: 'Type the characters shown on the portal', isDense: true),
-          ),
+          const SizedBox(height: 8),
+          Row(children: [
+            SizedBox(
+              width: 150,
+              child: TextField(
+                controller: captcha,
+                style: const TextStyle(fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Captcha',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Enter the captcha shown on ${discom!.code}', style: TextStyle(color: C.mute, fontSize: 12))),
+          ]),
         ],
         if (_validUsc && discom != null) ...[
           const SizedBox(height: 10),

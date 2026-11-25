@@ -26,13 +26,17 @@ class Discom {
   final String code;
   final String name;
   final UscRegion region;
-  const Discom(this.code, this.name, this.region);
+
+  /// Confirmed USC number lengths for this DISCOM. Empty means not confirmed yet,
+  /// so the number can't be matched to it automatically.
+  final List<int> usclengths;
+  const Discom(this.code, this.name, this.region, {this.usclengths = const []});
 }
 
 /// DISCOMs offered for the lookup.
 const kDiscoms = <Discom>[
-  Discom('TGSPDCL', 'Southern Power Distribution (Hyderabad area)', UscRegion.telangana),
-  Discom('TGNPDCL', 'Northern Power Distribution (Warangal / Karimnagar area)', UscRegion.telangana),
+  Discom('TGSPDCL', 'Southern Power Distribution (Hyderabad area)', UscRegion.telangana, usclengths: [9]),
+  Discom('TGNPDCL', 'Northern Power Distribution (Warangal / Karimnagar area)', UscRegion.telangana, usclengths: [8]),
   Discom('APSPDCL', 'Southern Power Distribution (Andhra Pradesh)', UscRegion.andhra),
   Discom('APEPDCL', 'Eastern Power Distribution (Visakhapatnam)', UscRegion.andhra),
   Discom('TPCODL', 'Central Odisha Distribution', UscRegion.odisha),
@@ -52,12 +56,25 @@ Discom? discomByCode(String? code) {
 }
 
 /// USC numbers are 8 to 12 digits. Spaces are ignored.
-String? validateUsc(String raw) {
+String? validateUsc(String raw, {Discom? discom}) {
   final v = cleanUscNumber(raw);
   if (v.isEmpty) return 'Enter the USC number';
   if (!RegExp(r'^\d+$').hasMatch(v)) return 'USC number has digits only';
+  if (discom != null && discom.usclengths.isNotEmpty) {
+    if (!discom.usclengths.contains(v.length)) {
+      return '${discom.code} USC numbers are ${discom.usclengths.join(' or ')} digits';
+    }
+    return null;
+  }
   if (v.length < 8 || v.length > 12) return 'USC number is 8 to 12 digits';
   return null;
+}
+
+/// DISCOMs whose confirmed length rule matches this number. More than one means the
+/// user must choose; none means the number doesn't match any confirmed rule.
+List<Discom> detectDiscoms(String raw) {
+  final len = cleanUscNumber(raw).length;
+  return [for (final d in kDiscoms) if (d.usclengths.contains(len)) d];
 }
 
 String cleanUscNumber(String raw) => raw.replaceAll(RegExp(r'\s'), '');

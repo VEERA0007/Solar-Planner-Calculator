@@ -319,8 +319,8 @@ void main() {
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);
       await _shot(t, 'est-roi-$n');
-      await t.ensureVisible(find.text('Full Savings Page'));
-      await t.tap(find.text('Full Savings Page'));
+      await t.ensureVisible(find.text('Full Savings Page', skipOffstage: false));
+      await t.tap(find.text('Full Savings Page', skipOffstage: false));
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);
       await _shot(t, 'est-page-$n');

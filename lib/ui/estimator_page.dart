@@ -965,21 +965,24 @@ class _EstimatorPageState extends State<EstimatorPage> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-                child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Text('DCR', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
-                  Switch(
-                    value: !dcr,
-                    onChanged: (v) {
-                      setState(() {
-                        dcr = !v;
-                        panelIdx = 1;
-                      });
-                      _recalc();
-                    },
-                    activeColor: C.amber,
-                  ),
-                  Text('Non-DCR', style: TextStyle(color: C.text, fontWeight: FontWeight.w800)),
-                ]),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('DCR', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
+                    Switch(
+                      value: !dcr,
+                      onChanged: (v) {
+                        setState(() {
+                          dcr = !v;
+                          panelIdx = 1;
+                        });
+                        _recalc();
+                      },
+                      activeColor: C.amber,
+                    ),
+                    Text('Non-DCR', style: TextStyle(color: C.text, fontWeight: FontWeight.w800)),
+                  ]),
+                ),
               ),
             ),
             const SizedBox(width: 8),

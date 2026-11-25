@@ -432,7 +432,7 @@ class _UscSectionState extends State<UscSection> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(children: [
             Expanded(
-              flex: 4,
+              flex: 5,
               child: Row(children: [
                 Text('${i + 1}.', style: TextStyle(color: C.mute, fontSize: 12.5)),
                 const SizedBox(width: 6),
@@ -564,11 +564,11 @@ class _UscSectionState extends State<UscSection> {
   Widget _kv2(String a, String av, String b, String bv) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(children: [
-          Expanded(child: RichText(text: TextSpan(style: TextStyle(color: C.text, fontSize: 13), children: [
+          Expanded(child: Text.rich(TextSpan(style: TextStyle(color: C.text, fontSize: 13), children: [
             TextSpan(text: '$a: ', style: TextStyle(color: C.mute)),
             TextSpan(text: av, style: const TextStyle(fontWeight: FontWeight.w800)),
           ]))),
-          Expanded(child: RichText(text: TextSpan(style: TextStyle(color: C.text, fontSize: 13), children: [
+          Expanded(child: Text.rich(TextSpan(style: TextStyle(color: C.text, fontSize: 13), children: [
             TextSpan(text: '$b: ', style: TextStyle(color: C.mute)),
             TextSpan(text: bv, style: const TextStyle(fontWeight: FontWeight.w800)),
           ]))),
@@ -583,7 +583,7 @@ class _UscSectionState extends State<UscSection> {
   String _range(UscRecord r) {
     final l = r.last12;
     if (l.isEmpty) return '';
-    return '${l.first.month} → ${l.last.month}';
+    return '${l.first.month} to ${l.last.month}';
   }
 
   String _peak(UscRecord r) {

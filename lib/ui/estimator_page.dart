@@ -316,9 +316,56 @@ class _EstimatorPageState extends State<EstimatorPage> {
     toast(context, idx >= 0 ? 'Estimate updated' : 'Estimate saved');
   }
 
+  /// Required parts for the chosen system: (title, spec, quantity, category, note).
+  List<(String, String, String, String, String)> _bomParts(SysOption o, EstimateResult r) {
+    final models = panelsFor(dcr);
+    return <(String, String, String, String, String)>[
+      ('${models[panelIdx].wp}W ${dcr ? 'DCR' : 'Non-DCR'} Solar Modules', models[panelIdx].name, '${o.panels} Nos (${o.kwp.toStringAsFixed(2)} kWp)', 'PV MODULES',
+          dcr ? 'Filtered DCR domestic modules required for PM Surya Ghar Govt DBT subsidy.' : 'Open-market modules. No government subsidy.'),
+      (o.invLabel, o.threePhase ? '3-phase 415V' : '1-phase 230V', '1 Unit', 'INVERTER / PCU', 'Sized for ${_t(invKw(o))} kW AC.'),
+      if (sys.hasBattery && o.batteryKwh > 0)
+        ('LiFePO4 Battery Bank', 'Battery storage for backup', '${o.batteryKwh.toStringAsFixed(1)} kWh', 'BATTERY BANK', 'Needed for backup and night power.'),
+      ('Mounting Structure', 'Ground or elevated structure', '1 Set (${o.panels}-panel bay)', 'BOS & STRUCTURE', 'Sized for about ${r.roofSqm.round()} sq m of roof.'),
+      ('DC & AC Cabling + MC4', 'UV DC cable and armoured AC cable', '1 Set', 'BOS & STRUCTURE', 'Keeps voltage drop low between array, inverter and board.'),
+      ('DCDB + Protection Kit', 'DC SPD, DC fuse, AC MCB/MCCB and AC SPD', '1 Combined Kit', 'BOS & PROTECTION', 'Protects the feeders against surges and faults.'),
+      ('Earthing + Lightning Arrester', 'Earth pits, GI strip and LA', '3 Sets', 'BOS & PROTECTION', 'Dedicated DC, AC and LA grounding.'),
+      if (sys != SysType.offGrid)
+        ('Bi-Directional Net Meter', '3-phase DISCOM-approved smart meter set', '1 Meter Pair', 'METERING & COMPLIANCE', 'Needed for DISCOM net-metering credits.'),
+      if (dcr)
+        ('DCR / ALMM Compliance Dossier', 'ALMM certificate and domestic cell invoice', '1 Complete Pack', 'METERING & COMPLIANCE', 'Proof that the cells and modules are domestically made.'),
+    ];
+  }
+
+  QuoteInfo _quoteInfo(EstimateResult r) {
+    final o = opts[sys] ?? _options(r.monthlyUnits)[sys]!;
+    final models = panelsFor(dcr);
+    final parts = _bomParts(o, r);
+    final invKwVal = invKw(o);
+    return QuoteInfo(
+      architecture: sys == SysType.onGrid ? 'On-Grid' : sys == SysType.hybrid ? 'Hybrid' : 'Off-Grid',
+      standard: dcr ? 'DCR ALMM (Subsidy Eligible)' : 'Non-DCR (No subsidy)',
+      category: category.toUpperCase(),
+      inverter: '${_t(invKwVal)} kW ${inverterBrand.text.trim().isEmpty ? o.invLabel : inverterBrand.text.trim()}',
+      phase: o.threePhase ? '3-Phase 415V' : '1-Phase 230V',
+      panel: '${models[panelIdx].wp}W ${dcr ? 'DCR' : 'Non-DCR'} ${models[panelIdx].name}',
+      panelCount: o.panels,
+      panelKwp: o.kwp,
+      batteryKwh: o.batteryKwh,
+      psh: s.locationYield,
+      escalation: escalation,
+      omPct: omPct,
+      tariff: s.unitPrice,
+      site: address.text.trim(),
+      sizingNote: invKwVal > 0
+          ? 'Optimal DC/AC ratio (${(o.kwp / invKwVal).toStringAsFixed(2)}x). Recommended inverter: ${_t(invKwVal)} kW for ${o.kwp.toStringAsFixed(2)} kWp of panels.'
+          : '',
+      bom: [for (final p in parts) [p.$4, '${p.$1}: ${p.$2}. ${p.$5}', p.$3, 'Required']],
+    );
+  }
+
   Future<void> _quote(Customer c, EstimateResult r) async {
     try {
-      await shareQuote(c, r, s.brand);
+      await shareQuote(c, r, s.brand, info: _quoteInfo(r));
     } catch (e) {
       if (mounted) toast(context, 'Could not create PDF: $e');
     }
@@ -836,21 +883,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final pbText = good ? '${fmt1(pb!)} Yrs' : '${r.years}+ Yrs';
 
     // Required parts for this system, grouped by the filter tabs.
-    final parts = <(String, String, String, String, String)>[
-      ('${models[panelIdx].wp}W ${dcr ? 'DCR' : 'Non-DCR'} Solar Modules', models[panelIdx].name, '${o.panels} Nos (${o.kwp.toStringAsFixed(2)} kWp)', 'PV MODULES',
-          dcr ? 'Filtered DCR domestic modules required for PM Surya Ghar Govt DBT subsidy.' : 'Open-market modules. No government subsidy.'),
-      (o.invLabel, o.threePhase ? '3-phase 415V' : '1-phase 230V', '1 Unit', 'INVERTER / PCU', 'Sized for ${_t(invKw(o))} kW AC.'),
-      if (sys.hasBattery && o.batteryKwh > 0)
-        ('LiFePO4 Battery Bank', 'Battery storage for backup', '${o.batteryKwh.toStringAsFixed(1)} kWh', 'BATTERY BANK', 'Needed for backup and night power.'),
-      ('Mounting Structure', 'Ground or elevated structure', '1 Set (${o.panels}-panel bay)', 'BOS & STRUCTURE', 'Sized for about ${r.roofSqm.round()} sq m of roof.'),
-      ('DC & AC Cabling + MC4', 'UV DC cable and armoured AC cable', '1 Set', 'BOS & STRUCTURE', 'Keeps voltage drop low between array, inverter and board.'),
-      ('DCDB + Protection Kit', 'DC SPD, DC fuse, AC MCB/MCCB and AC SPD', '1 Combined Kit', 'BOS & PROTECTION', 'Protects the feeders against surges and faults.'),
-      ('Earthing + Lightning Arrester', 'Earth pits, GI strip and LA', '3 Sets', 'BOS & PROTECTION', 'Dedicated DC, AC and LA grounding.'),
-      if (sys != SysType.offGrid)
-        ('Bi-Directional Net Meter', '3-phase DISCOM-approved smart meter set', '1 Meter Pair', 'METERING & COMPLIANCE', 'Needed for DISCOM net-metering credits.'),
-      if (dcr)
-        ('DCR / ALMM Compliance Dossier', 'ALMM certificate and domestic cell invoice', '1 Complete Pack', 'METERING & COMPLIANCE', 'Proof that the cells and modules are domestically made.'),
-    ];
+    final parts = _bomParts(o, r);
     bool inTab(String c) => switch (bomTab) {
           'PV, Inv & Battery' => c == 'PV MODULES' || c == 'INVERTER / PCU' || c == 'BATTERY BANK',
           'BOS & Structure' => c.startsWith('BOS'),

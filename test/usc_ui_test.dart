@@ -23,13 +23,13 @@ class _SampleSource implements UscSource {
       'Nov 2025', 'Dec 2025', 'Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026',
       'Jun 2026', 'Jul 2026', 'Aug 2026', 'Sep 2026', 'Oct 2026', 'Nov 2026',
     ];
-    const units = [116, 116, 114, 122, 106, 93, 110, 112, 111, 122, 114, 136, 119];
-    const bills = [541.0, 535, 518, 558, 475, 324, 496.61, 504, 498, 557, 517, 624, 546];
+    const units = <double>[116, 116, 114, 122, 106, 93, 110, 112, 111, 122, 114, 136, 119];
+    const bills = <double>[541.0, 535, 518, 558, 475, 324, 496.61, 504, 498, 557, 517, 624, 546];
     final months = [
       for (var i = 0; i < names.length; i++)
         UscMonth(
           month: names[i],
-          units: units[i].toDouble(),
+          units: units[i],
           bill: bills[i],
           arrears: 100,
           paid: 0,

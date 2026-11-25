@@ -148,7 +148,7 @@ void main() {
     await t.pumpAndSettle();
     await _shot(t, 'usc-b-result');
 
-    await t.tap(find.textContaining('DISCOM Bills'));
+    await t.tap(find.text('Show 13-Mo DISCOM Bills'));
     await t.pumpAndSettle();
     await _shot(t, 'usc-c-ledger');
     expect(find.text('Govt DISCOM Bills'), findsOneWidget);

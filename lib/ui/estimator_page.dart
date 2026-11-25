@@ -7,7 +7,9 @@ import '../core/estimator_data.dart';
 import '../core/service_data.dart';
 import '../core/store.dart';
 import '../core/tariff.dart';
+import '../core/usc.dart';
 import 'pdf_quote.dart';
+import 'usc_page.dart';
 import 'roof_map.dart';
 import 'theme.dart';
 
@@ -90,6 +92,17 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   String _t(num v) => v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+
+  /// Opens the USC lookup. The 12-month average it returns becomes this month's units.
+  Future<void> _openUsc() async {
+    final r = await Navigator.of(context).push<UscRecord>(MaterialPageRoute(builder: (_) => const UscPage()));
+    if (r == null || !mounted) return;
+    setState(() {
+      mode = 'units';
+      units.text = '${r.avgUnits.round()}';
+    });
+    toast(context, '${r.avgUnits.round()} kWh/month set from ${r.discom.code} 12-month average');
+  }
 
   void _fill(EstimateInput d) {
     mode = 'units';
@@ -455,6 +468,12 @@ class _EstimatorPageState extends State<EstimatorPage> {
             _chip('Units (kWh)', mode == 'units', () => setState(() => mode = 'units')),
             _chip('Bill (₹)', mode == 'bill', () => setState(() => mode = 'bill')),
           ]),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _openUsc,
+            icon: const Icon(Icons.bolt_outlined, size: 18),
+            label: const Text('Fetch 12 months by USC number'),
+          ),
           const SizedBox(height: 12),
           if (mode == 'units') _field(units, 'Units / Month (kWh)'),
           if (mode == 'bill') _field(bill, 'Bill / Month (energy charges)', prefix: '₹ '),

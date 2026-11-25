@@ -810,6 +810,9 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final o = opts[sys] ?? _options(r.monthlyUnits)[sys]!;
     final rates = s.rates;
     final rate = dcr ? rates.dcr : rates.nonDcr;
+    final extra = o.type == SysType.hybrid ? o.kwp * rates.hybridExtra : (o.type == SysType.offGrid ? o.kwp * rates.offExtra : 0.0);
+    final battery = o.batteryKwh * rates.battery;
+    final pv = o.gross - extra.roundToDouble() - battery.roundToDouble();
     final models = panelsFor(dcr);
     final roofSqm = _num(roof);
     final warns = <String>[];
@@ -910,11 +913,24 @@ class _EstimatorPageState extends State<EstimatorPage> {
         );
 
     return [
-      TextButton.icon(
-        onPressed: () => setState(() => stage = 0),
-        icon: const Icon(Icons.arrow_back, size: 16),
-        label: const Text('Edit Enquiry', style: TextStyle(fontWeight: FontWeight.w800)),
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Solar System Estimation', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 19)),
+                const SizedBox(height: 3),
+                Text('${o.type.label} · ${dcr ? 'DCR' : 'Non-DCR'} · ${_t(double.parse(o.kwp.toStringAsFixed(2)))} kW (${o.type == SysType.onGrid ? 'Grid-Tied' : o.type == SysType.hybrid ? 'Hybrid' : 'Standalone'})', style: TextStyle(color: C.mute, fontSize: 12.5)),
+              ]),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(onPressed: () => _quote(_readCustomer(), r), style: FilledButton.styleFrom(backgroundColor: C.text, foregroundColor: C.bg, minimumSize: const Size(0, 44)), child: const Text('PDF Studio', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5))),
+            TextButton(onPressed: () => setState(() => stage = 0), child: const Text('Edit\nEnquiry', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5))),
+          ]),
+          for (final w in warns) _note(Icons.warning_amber_rounded, C.red, w),
+        ]),
       ),
+      _gap(),
       // 3-way interlink
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1016,10 +1032,58 @@ class _EstimatorPageState extends State<EstimatorPage> {
           ]),
         ]),
       ),
-      if (warns.isNotEmpty) ...[
-        _gap(),
-        for (final w in warns) _note(Icons.warning_amber_rounded, C.red, w),
-      ],
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.shield_outlined, color: C.green, size: 20),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('DCR Hardware Filter & Standard', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+            Text('DCR', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 12.5)),
+            Switch(
+              value: !dcr,
+              onChanged: (v) {
+                setState(() {
+                  dcr = !v;
+                  panelIdx = 1;
+                });
+                _recalc();
+              },
+              thumbColor: const WidgetStatePropertyAll(Colors.white),
+              trackColor: WidgetStatePropertyAll(C.amber),
+              trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+            ),
+            Text('Non-DCR', style: TextStyle(color: C.text, fontWeight: FontWeight.w800, fontSize: 12.5)),
+          ]),
+          const SizedBox(height: 4),
+          Text(dcr ? 'DCR modules use domestic cells (ALMM list). Needed for the PM Surya Ghar subsidy.' : 'Open panels (${models.first.wp}W to ${models.last.wp}W, ${models.length} typical models). Lower cost, no subsidy.', style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.3)),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 78,
+            child: ListView(scrollDirection: Axis.horizontal, children: [
+              for (var i = 0; i < models.length; i++)
+                GestureDetector(
+                  onTap: () {
+                    setState(() => panelIdx = i);
+                    _recalc();
+                  },
+                  child: Container(
+                    width: 108,
+                    margin: const EdgeInsets.only(right: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: panelIdx == i ? C.blue : C.card2, borderRadius: BorderRadius.circular(16), border: Border.all(color: panelIdx == i ? C.blue : C.line)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(models[i].label, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: panelIdx == i ? Colors.white : C.text)),
+                      Text('${models[i].efficiency.toStringAsFixed(1)}% eff', style: TextStyle(fontSize: 11.5, color: panelIdx == i ? Colors.white70 : C.mute)),
+                      Text(models[i].name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10.5, color: panelIdx == i ? Colors.white70 : C.mute)),
+                    ]),
+                  ),
+                ),
+            ]),
+          ),
+          const SizedBox(height: 8),
+          Text('Typical sizes. Confirm the datasheet and ALMM listing before quoting.', style: TextStyle(color: C.mute, fontSize: 11.5)),
+        ]),
+      ),
       _gap(),
       // Battery choice
       Panel(
@@ -1048,6 +1112,92 @@ class _EstimatorPageState extends State<EstimatorPage> {
             const SizedBox(height: 10),
             _field(backup, 'Battery backup (hours)', hint: 'Enter hrs (inverter)', onChanged: _recalc),
           ],
+        ]),
+      ),
+      _gap(),
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _title(Icons.bolt, C.orange, 'Inverter Brand, Power & Engineering', '${o.invLabel} · ${o.threePhase ? '3-phase 415V' : '1-phase 230V'}'),
+          const SizedBox(height: 12),
+          Text('INVERTER POWER (KW)', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12)),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
+            child: Row(children: [
+              Expanded(child: Text(_t(invKw(o)), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17))),
+              Text(invOverride == null ? 'Auto (${_t(o.invKw)} kW)' : 'Chosen', style: TextStyle(color: C.mute, fontSize: 12)),
+            ]),
+          ),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 6, children: [
+            Text('Standard sizes:', style: TextStyle(color: C.mute, fontSize: 12.5)),
+            for (final k in standardInverterSizes(o.kwp))
+              GestureDetector(
+                onTap: () => setState(() => invOverride = k == o.invKw ? null : k),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                  decoration: BoxDecoration(color: (invOverride ?? o.invKw) == k ? C.orange : C.card2, borderRadius: BorderRadius.circular(12), border: Border.all(color: (invOverride ?? o.invKw) == k ? C.orange : C.line)),
+                  child: Text('${_t(k)} kW${k == o.invKw ? ' ★' : ''}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: (invOverride ?? o.invKw) == k ? Colors.white : C.text)),
+                ),
+              ),
+          ]),
+          _note(Icons.tune, C.green, '${dcAcAdvice(o.kwp, invKw(o))}\nSuggested range: ${_t(double.parse((o.kwp * .8).toStringAsFixed(1)))} to ${_t(double.parse((o.kwp * 1.1).toStringAsFixed(1)))} kW AC for ${o.kwp.toStringAsFixed(2)} kWp of panels.'),
+          const SizedBox(height: 12),
+          TextField(controller: inverterBrand, decoration: const InputDecoration(labelText: 'Inverter brand', hintText: 'Type a brand (e.g. Sungrow, Havells, Deye)', isDense: true)),
+          const SizedBox(height: 10),
+          Text('SUGGESTED ${o.type.label.toUpperCase()} INVERTERS (TAP TO SELECT)', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final b in inverterBrandInfo(o.type))
+              GestureDetector(
+                onTap: () => setState(() => inverterBrand.text = b.name),
+                child: Container(
+                  width: (MediaQuery.of(context).size.width - 28 - 36 - 8) / 2,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: inverterBrand.text == b.name ? C.chipSun : C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: inverterBrand.text == b.name ? C.orange : C.line)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [Expanded(child: Text(b.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14))), Text('${b.eff}%', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))]),
+                    const SizedBox(height: 2),
+                    Text(b.series, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 11)),
+                  ]),
+                ),
+              ),
+          ]),
+          const SizedBox(height: 6),
+          Text('Peak efficiencies are typical datasheet figures. Confirm model and availability with the supplier.', style: TextStyle(color: C.mute, fontSize: 11)),
+        ]),
+      ),
+      _gap(),
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Expanded(child: Text('System Option (Inverter & Batteries)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+            Text('${_t(o.invKw)} kW', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800)),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            for (final t in SysType.values)
+              _chip(t.label, sys == t, () {
+                setState(() => sys = t);
+                _recalc();
+              }, sub: const ['String inverter', 'Hybrid inv + LFP', 'PCU + full bank'][t.index]),
+          ]),
+          if (sys.hasBattery) ...[
+            const SizedBox(height: 10),
+            _field(backup, 'Battery backup (hours)', hint: 'Enter hrs (inverter)', onChanged: _recalc),
+          ],
+        ]),
+      ),
+      _gap(),
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('SIZING SUMMARY', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: .5)),
+          const SizedBox(height: 10),
+          IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [_stat('DAILY USAGE', r.monthlyUnits / 30 < 10 ? (r.monthlyUnits / 30).toStringAsFixed(2) : (r.monthlyUnits / 30).toStringAsFixed(1), c: C.orange, sub: 'Units / Day'), _stat('SYSTEM SIZE', _t(double.parse(r.kw.toStringAsFixed(2))), c: C.blue, sub: 'kWp · ${r.panels} panels')])),
+          const SizedBox(height: 8),
+          IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [_stat('ROOF NEEDED', '${r.roofSqm.round()} sq m', sub: '${r.roofSqft.round()} sq ft'), _stat('GENERATION / YEAR', groupIndian(r.gen1), c: C.green, sub: 'kWh')])),
         ]),
       ),
       _gap(),
@@ -1210,6 +1360,39 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${dcr ? 'DCR' : 'Non-DCR'} Project Cost Breakdown', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                Text('${_profile.label} · Turnkey estimate', style: TextStyle(color: C.mute, fontSize: 12.5)),
+              ]),
+            ),
+            Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5), decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(12)), child: Text('${o.type.label} (${o.type == SysType.offGrid ? 'Standalone' : 'Grid'})', style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 11.5))),
+          ]),
+          const SizedBox(height: 8),
+          _line('PV array & mounting (${o.kwp.toStringAsFixed(2)} kW @ ${rupee(rate)}/kW)', rupee(pv)),
+          _line('${o.invLabel}${o.type == SysType.onGrid ? '' : ' (type uplift)'}', o.type == SysType.onGrid ? 'Included' : '+ ${rupee(extra)}'),
+          if (o.type.hasBattery) _line('Battery ${o.batteryKwh.toStringAsFixed(1)} kWh LiFePO₄', o.batteryKwh > 0 ? '+ ${rupee(battery)}' : 'Enter backup hours'),
+          Divider(color: C.line),
+          _line('Gross turnkey project cost', rupee(o.gross), bold: true),
+          _line('PM Surya Ghar central subsidy', o.subsidy > 0 ? '- ${rupee(o.subsidy)}' : rupee(0), c: o.subsidy > 0 ? C.green : null),
+          Text(subsidyNote(_profile, dcr, o.type), style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.chipSun, borderRadius: BorderRadius.circular(14)),
+            child: Row(children: [
+              const Expanded(child: Text('Net project cost', style: TextStyle(fontWeight: FontWeight.w800))),
+              Text(rupee(o.net), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 19)),
+            ]),
+          ),
+        ]),
+      ),
+      _gap(),
+      _bigButton('ROI Dashboard', () => setState(() => stage = 2), icon: Icons.trending_up),
+      const SizedBox(height: 10),
       _bigButton('PDF Proposal Studio', () => _openPdfStudio(r), icon: Icons.picture_as_pdf_outlined),
       const SizedBox(height: 10),
       Row(children: [

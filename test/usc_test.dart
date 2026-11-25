@@ -100,14 +100,16 @@ void main() {
       final r = _record(months);
       expect(r.missingMonths, 1);
       expect(r.totalUnits12, 1375 - 93);
-      expect(r.avgUnits, closeTo((1375 - 93) / 12, 0.0001));
+      expect(r.billedCount, 11);
+      expect(r.avgUnits, closeTo((1375 - 93) / 11, 0.0001));
     });
 
     test('fewer than 12 months: average still divides by 12', () {
       final r = _record(_reference.sublist(0, 6));
       expect(r.last12.length, 6);
       expect(r.missingMonths, 0);
-      expect(r.avgUnits, closeTo(r.totalUnits12 / 12, 0.0001));
+      expect(r.billedCount, 6);
+      expect(r.avgUnits, closeTo(r.totalUnits12 / 6, 0.0001));
     });
 
     test('no months at all gives zero averages', () {
@@ -144,6 +146,22 @@ void main() {
         () => src.fetch(usc: '110325672', discom: discomByCode('TGSPDCL')!, captcha: 'abc'),
         throwsA(isA<UscException>()),
       );
+    });
+  });
+
+  group('paste parser', () {
+    test('reads month, year, units and bill, oldest first', () {
+      final p = parsePastedBills('Dec 2025 116 535\nNov 2025 116 541\n');
+      expect(p.skipped, 0);
+      expect(p.months.map((m) => m.month).toList(), ['Nov 2025', 'Dec 2025']);
+      expect(p.months.first.units, 116);
+      expect(p.months.first.bill, 541);
+    });
+
+    test('counts lines it cannot read', () {
+      final p = parsePastedBills('Nov 2025 360 2580\nhello\n2025 Nov 1 2');
+      expect(p.months.length, 1);
+      expect(p.skipped, 2);
     });
   });
 }

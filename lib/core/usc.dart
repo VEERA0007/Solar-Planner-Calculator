@@ -35,7 +35,7 @@ class Discom {
 
 /// DISCOMs offered for the lookup.
 const kDiscoms = <Discom>[
-  Discom('TGSPDCL', 'Southern Power Distribution (Hyderabad area)', UscRegion.telangana, usclengths: [9]),
+  Discom('TGSPDCL', 'Southern Power Distribution (Hyderabad area)', UscRegion.telangana, usclengths: [9, 10, 11, 12]),
   Discom('TGNPDCL', 'Northern Power Distribution (Warangal / Karimnagar area)', UscRegion.telangana, usclengths: [8]),
   Discom('APSPDCL', 'Southern Power Distribution (Andhra Pradesh)', UscRegion.andhra),
   Discom('APEPDCL', 'Eastern Power Distribution (Visakhapatnam)', UscRegion.andhra),
@@ -248,16 +248,22 @@ class UscRecord {
   /// Months on the portal, out of the months in the list.
   int get verifiedMonths => months.where((m) => m.onPortal).length;
 
-  /// Average units per month over the last 12 months, with missing months as 0.
-  double get avgUnits => last12.isEmpty ? 0 : totalUnits12 / 12;
+  /// Billed months among the last 12: on the portal, with units or a bill.
+  List<UscMonth> get billed => last12.where((m) => m.onPortal && (m.units > 0 || m.bill > 0)).toList();
 
-  /// Average bill per month over the last 12 months, with missing months as 0.
-  double get avgBill => last12.isEmpty ? 0 : totalBill12 / 12;
+  /// Number of billed months used for the averages (up to 12).
+  int get billedCount => billed.length;
 
-  double get totalUnits12 => last12.fold<double>(0, (a, m) => a + m.units);
-  double get totalBill12 => last12.fold<double>(0, (a, m) => a + m.bill);
+  /// Average units per month over the billed months that are available.
+  double get avgUnits => billed.isEmpty ? 0 : totalUnits12 / billed.length;
 
-  /// Rupees per unit over the 12 months.
+  /// Average bill per month over the billed months that are available.
+  double get avgBill => billed.isEmpty ? 0 : totalBill12 / billed.length;
+
+  double get totalUnits12 => billed.fold<double>(0, (a, m) => a + m.units);
+  double get totalBill12 => billed.fold<double>(0, (a, m) => a + m.bill);
+
+  /// Rupees per unit over the billed months.
   double get blendedRate => totalUnits12 > 0 ? totalBill12 / totalUnits12 : 0;
 
   Map<String, dynamic> toJson() => {
@@ -345,4 +351,43 @@ class UscStore {
       // Saving is a convenience. The screen still works without it.
     }
   }
+}
+
+/// Result of pasting bill rows copied from a portal.
+class PastedBills {
+  final List<UscMonth> months;
+
+  /// Lines that could not be read.
+  final int skipped;
+  const PastedBills(this.months, this.skipped);
+}
+
+const _monthShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+int _monthKey(String label) {
+  final y = int.parse(label.substring(4));
+  return y * 12 + _monthShort.indexOf(label.substring(0, 3));
+}
+
+/// Reads lines like "Nov 2025 360 2580" (month, year, units, bill). Returns rows oldest first.
+PastedBills parsePastedBills(String text) {
+  final re = RegExp(r"^\s*([A-Za-z]{3})[A-Za-z]*\.?[\s\-/,']*(\d{4})\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$");
+  final rows = <UscMonth>[];
+  var skipped = 0;
+  for (final raw in text.split('\n')) {
+    if (raw.trim().isEmpty) continue;
+    final m = re.firstMatch(raw);
+    final idx = m == null ? -1 : _monthShort.indexWhere((x) => x.toLowerCase() == m.group(1)!.toLowerCase());
+    if (m == null || idx < 0) {
+      skipped++;
+      continue;
+    }
+    rows.add(UscMonth(
+      month: '${_monthShort[idx]} ${m.group(2)}',
+      units: double.parse(m.group(3)!.replaceAll(',', '')),
+      bill: double.parse(m.group(4)!.replaceAll(',', '')),
+    ));
+  }
+  rows.sort((a, b) => _monthKey(a.month).compareTo(_monthKey(b.month)));
+  return PastedBills(rows, skipped);
 }

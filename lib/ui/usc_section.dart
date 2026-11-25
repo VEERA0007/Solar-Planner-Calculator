@@ -24,6 +24,9 @@ class _UscSectionState extends State<UscSection> {
   Discom? discom = kDiscoms.first;
   bool busy = false;
   bool showLedger = false;
+  bool showPaste = false;
+  String? pasteError;
+  final pasteCtl = TextEditingController();
   String? error;
   String? notice;
   UscRecord? result;
@@ -42,6 +45,7 @@ class _UscSectionState extends State<UscSection> {
   void dispose() {
     usc.dispose();
     captcha.dispose();
+    pasteCtl.dispose();
     super.dispose();
   }
 
@@ -229,6 +233,16 @@ class _UscSectionState extends State<UscSection> {
           const SizedBox(height: 10),
           Text(notice!, style: TextStyle(color: C.amber, fontWeight: FontWeight.w700, fontSize: 13)),
         ],
+        const SizedBox(height: 4),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => setState(() => showPaste = !showPaste),
+            icon: const Icon(Icons.content_paste, size: 16),
+            label: Text(showPaste ? 'Hide paste' : 'Paste bills from portal instead'),
+          ),
+        ),
+        if (showPaste) _pasteBox(),
         const SizedBox(height: 12),
         _infoBox(Icons.receipt_long_outlined, C.green, 'Monthly units & bills are synced automatically from official government DISCOM portals.'),
         if (r != null) ..._resultBlocks(r),
@@ -560,6 +574,65 @@ class _UscSectionState extends State<UscSection> {
             ),
           ),
       ];
+
+  Widget _pasteBox() {
+    final d = discom;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          'Copy the month, units and bill rows from the ${d?.code ?? 'DISCOM'} portal and paste them here, one per line. Example: Nov 2025 360 2580',
+          style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.35),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: pasteCtl,
+          minLines: 4,
+          maxLines: 8,
+          decoration: InputDecoration(hintText: 'Nov 2025 360 2580', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+        ),
+        if (pasteError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(pasteError!, style: TextStyle(color: C.red, fontSize: 12.5, fontWeight: FontWeight.w700)),
+          ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(onPressed: _importPaste, child: const Text('Use pasted bills')),
+        ),
+      ]),
+    );
+  }
+
+  void _importPaste() {
+    final d = discom;
+    final problem = validateUsc(usc.text, discom: d);
+    if (d == null || problem != null) {
+      setState(() => pasteError = problem ?? 'Choose a state and DISCOM first');
+      return;
+    }
+    final parsed = parsePastedBills(pasteCtl.text);
+    if (parsed.months.isEmpty) {
+      setState(() => pasteError = 'No rows found. Each line needs a month, year, units and bill, e.g. Nov 2025 360 2580');
+      return;
+    }
+    setState(() {
+      pasteError = null;
+      error = null;
+      notice = parsed.skipped > 0
+          ? '${parsed.skipped} line(s) could not be read and were skipped. ${parsed.months.length} months imported.'
+          : 'Imported ${parsed.months.length} months from the pasted portal rows.';
+      result = UscRecord(
+        usc: cleanUscNumber(usc.text),
+        discom: d,
+        consumerName: '',
+        months: parsed.months,
+        fetchedAt: DateTime.now(),
+      );
+      openRows = {};
+    });
+  }
 
   // ---- small helpers ----
 

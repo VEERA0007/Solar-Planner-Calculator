@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -319,6 +320,7 @@ void main() {
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);
       await _shot(t, 'est-roi-$n');
+      debugPrint('DBG scrollables=${find.byType(Scrollable).evaluate().length} listviews=${find.byType(ListView).evaluate().length} roiTitle=${find.text('25-Year ROI & Savings').evaluate().length} fullSav=${find.text('Full Savings Page', skipOffstage: false).evaluate().length} exc=${t.takeException()}');
       await t.dragUntilVisible(find.text('Full Savings Page'), find.byType(Scrollable).first, const Offset(0, -300));
       await t.tap(find.text('Full Savings Page'));
       await t.pump(const Duration(seconds: 1));

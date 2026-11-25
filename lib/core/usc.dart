@@ -29,7 +29,7 @@ class Discom {
   const Discom(this.code, this.name, this.region);
 }
 
-/// DISCOMs offered for the lookup. The user picks the state first, then the DISCOM.
+/// DISCOMs offered for the lookup.
 const kDiscoms = <Discom>[
   Discom('TGSPDCL', 'Southern Power Distribution (Hyderabad area)', UscRegion.telangana),
   Discom('TGNPDCL', 'Northern Power Distribution (Warangal / Karimnagar area)', UscRegion.telangana),
@@ -53,7 +53,7 @@ Discom? discomByCode(String? code) {
 
 /// USC numbers are 8 to 12 digits. Spaces are ignored.
 String? validateUsc(String raw) {
-  final v = raw.replaceAll(RegExp(r'\s'), '');
+  final v = cleanUscNumber(raw);
   if (v.isEmpty) return 'Enter the USC number';
   if (!RegExp(r'^\d+$').hasMatch(v)) return 'USC number has digits only';
   if (v.length < 8 || v.length > 12) return 'USC number is 8 to 12 digits';
@@ -70,6 +70,8 @@ class UscMonth {
   final double bill;
   final double arrears;
   final double paid;
+  final double adjust;
+  final double balance;
 
   /// False when the portal had no figure for this month. Units and bill are 0 then.
   final bool onPortal;
@@ -83,6 +85,8 @@ class UscMonth {
     required this.bill,
     this.arrears = 0,
     this.paid = 0,
+    this.adjust = 0,
+    this.balance = 0,
     this.onPortal = true,
     this.present = false,
   });
@@ -93,6 +97,8 @@ class UscMonth {
         'bill': bill,
         'arrears': arrears,
         'paid': paid,
+        'adjust': adjust,
+        'balance': balance,
         'onPortal': onPortal,
         'present': present,
       };
@@ -103,8 +109,93 @@ class UscMonth {
         bill: (j['bill'] as num).toDouble(),
         arrears: (j['arrears'] as num? ?? 0).toDouble(),
         paid: (j['paid'] as num? ?? 0).toDouble(),
+        adjust: (j['adjust'] as num? ?? 0).toDouble(),
+        balance: (j['balance'] as num? ?? 0).toDouble(),
         onPortal: j['onPortal'] as bool? ?? true,
         present: j['present'] as bool? ?? false,
+      );
+}
+
+/// One line of the portal's charge breakup, for example "Energy Chg" = 431.20.
+class ChargeLine {
+  final String label;
+  final double amount;
+  const ChargeLine(this.label, this.amount);
+}
+
+/// The current bill and service details shown on the official bill card.
+class BillDetail {
+  final String billNo;
+  final String ero;
+  final String section;
+  final String meterNo;
+  final String category;
+  final String loadPhase;
+  final String meterReading;
+  final String billDate;
+  final String dueDate;
+  final String lastPaid;
+  final String disconnDate;
+  final double billUnits;
+  final double billAmount;
+  final double totalPayable;
+  final List<ChargeLine> charges;
+
+  const BillDetail({
+    this.billNo = '',
+    this.ero = '',
+    this.section = '',
+    this.meterNo = '',
+    this.category = '',
+    this.loadPhase = '',
+    this.meterReading = '',
+    this.billDate = '',
+    this.dueDate = '',
+    this.lastPaid = '',
+    this.disconnDate = '',
+    this.billUnits = 0,
+    this.billAmount = 0,
+    this.totalPayable = 0,
+    this.charges = const [],
+  });
+
+  Map<String, dynamic> toJson() => {
+        'billNo': billNo,
+        'ero': ero,
+        'section': section,
+        'meterNo': meterNo,
+        'category': category,
+        'loadPhase': loadPhase,
+        'meterReading': meterReading,
+        'billDate': billDate,
+        'dueDate': dueDate,
+        'lastPaid': lastPaid,
+        'disconnDate': disconnDate,
+        'billUnits': billUnits,
+        'billAmount': billAmount,
+        'totalPayable': totalPayable,
+        'charges': [for (final c in charges) {'label': c.label, 'amount': c.amount}],
+      };
+
+  factory BillDetail.fromJson(Map<String, dynamic> j) => BillDetail(
+        billNo: j['billNo'] as String? ?? '',
+        ero: j['ero'] as String? ?? '',
+        section: j['section'] as String? ?? '',
+        meterNo: j['meterNo'] as String? ?? '',
+        category: j['category'] as String? ?? '',
+        loadPhase: j['loadPhase'] as String? ?? '',
+        meterReading: j['meterReading'] as String? ?? '',
+        billDate: j['billDate'] as String? ?? '',
+        dueDate: j['dueDate'] as String? ?? '',
+        lastPaid: j['lastPaid'] as String? ?? '',
+        disconnDate: j['disconnDate'] as String? ?? '',
+        billUnits: (j['billUnits'] as num? ?? 0).toDouble(),
+        billAmount: (j['billAmount'] as num? ?? 0).toDouble(),
+        totalPayable: (j['totalPayable'] as num? ?? 0).toDouble(),
+        charges: [
+          for (final c in (j['charges'] as List? ?? const []))
+            ChargeLine((c as Map)['label'] as String, (c['amount'] as num).toDouble()),
+        ],
       );
 }
 
@@ -114,12 +205,13 @@ class UscRecord {
   final Discom discom;
   final String consumerName;
   final String address;
-  final String category;
-  final String loadText;
   final DateTime fetchedAt;
 
-  /// Oldest first.
+  /// Oldest first. Usually 13 months: the 12 used for averages plus one earlier month.
   final List<UscMonth> months;
+
+  /// Current bill details. Null when the portal did not return them.
+  final BillDetail? bill;
 
   const UscRecord({
     required this.usc,
@@ -128,8 +220,7 @@ class UscRecord {
     required this.months,
     required this.fetchedAt,
     this.address = '',
-    this.category = '',
-    this.loadText = '',
+    this.bill,
   });
 
   /// The most recent 12 months (oldest first). Missing months count as 0.
@@ -137,24 +228,29 @@ class UscRecord {
 
   int get missingMonths => last12.where((m) => !m.onPortal).length;
 
+  /// Months on the portal, out of the months in the list.
+  int get verifiedMonths => months.where((m) => m.onPortal).length;
+
   /// Average units per month over the last 12 months, with missing months as 0.
-  double get avgUnits => last12.isEmpty ? 0 : last12.fold<double>(0, (a, m) => a + m.units) / 12;
+  double get avgUnits => last12.isEmpty ? 0 : totalUnits12 / 12;
 
   /// Average bill per month over the last 12 months, with missing months as 0.
-  double get avgBill => last12.isEmpty ? 0 : last12.fold<double>(0, (a, m) => a + m.bill) / 12;
+  double get avgBill => last12.isEmpty ? 0 : totalBill12 / 12;
 
   double get totalUnits12 => last12.fold<double>(0, (a, m) => a + m.units);
   double get totalBill12 => last12.fold<double>(0, (a, m) => a + m.bill);
+
+  /// Rupees per unit over the 12 months.
+  double get blendedRate => totalUnits12 > 0 ? totalBill12 / totalUnits12 : 0;
 
   Map<String, dynamic> toJson() => {
         'usc': usc,
         'discom': discom.code,
         'name': consumerName,
         'address': address,
-        'category': category,
-        'load': loadText,
         'fetchedAt': fetchedAt.toIso8601String(),
         'months': months.map((m) => m.toJson()).toList(),
+        'bill': bill?.toJson(),
       };
 
   /// Returns null when the saved data is damaged or its DISCOM is no longer known.
@@ -162,15 +258,15 @@ class UscRecord {
     try {
       final d = discomByCode(j['discom'] as String?);
       if (d == null) return null;
+      final b = j['bill'];
       return UscRecord(
         usc: j['usc'] as String,
         discom: d,
         consumerName: j['name'] as String? ?? '',
         address: j['address'] as String? ?? '',
-        category: j['category'] as String? ?? '',
-        loadText: j['load'] as String? ?? '',
         fetchedAt: DateTime.parse(j['fetchedAt'] as String),
         months: (j['months'] as List).map((e) => UscMonth.fromJson(Map<String, dynamic>.from(e as Map))).toList(),
+        bill: b is Map ? BillDetail.fromJson(Map<String, dynamic>.from(b)) : null,
       );
     } catch (_) {
       return null;

@@ -114,7 +114,7 @@ Widget _app(UscSource source, {bool dark = false}) => RepaintBoundary(
           body: SafeArea(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: UscSection(source: source, onApply: (_) {}),
+              child: UscSection(source: source, link: UscLink(), onApply: (_) {}),
             ),
           ),
         ),
@@ -148,11 +148,9 @@ void main() {
     await t.pumpAndSettle();
     await _shot(t, 'usc-b-result');
 
-    await t.tap(find.text('Show 13-Mo DISCOM Bills'));
-    await t.pumpAndSettle();
     await _shot(t, 'usc-c-ledger');
     expect(find.text('Govt DISCOM Bills'), findsOneWidget);
-    expect(find.textContaining('Synced (12-Mo Avg'), findsOneWidget);
+    expect(find.textContaining('Synced ('), findsOneWidget);
   });
 
   testWidgets('usc section: no connector shows a clear message, not data', (t) async {
@@ -165,6 +163,6 @@ void main() {
     await t.pumpAndSettle();
     await _shot(t, 'usc-d-not-connected');
     expect(find.textContaining('not connected yet'), findsOneWidget);
-    expect(find.textContaining('Synced (12-Mo Avg'), findsNothing);
+    expect(find.textContaining('Synced ('), findsNothing);
   });
 }

@@ -314,7 +314,7 @@ void main() {
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);
       await _shot(t, 'est-results-$n');
-      await t.tap(find.text('ROI Dashboard'));
+      await t.tap(find.text('Full ROI View'));
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);
       await _shot(t, 'est-roi-$n');

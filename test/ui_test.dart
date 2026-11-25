@@ -319,6 +319,7 @@ void main() {
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);
       await _shot(t, 'est-roi-$n');
+      await t.dragUntilVisible(find.text('Full Savings Page'), find.byType(Scrollable).first, const Offset(0, -300));
       await t.tap(find.text('Full Savings Page'));
       await t.pump(const Duration(seconds: 1));
       expect(t.takeException(), isNull);

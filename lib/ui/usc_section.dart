@@ -144,7 +144,7 @@ class _UscSectionState extends State<UscSection> {
         _regionRow(),
         const SizedBox(height: 10),
         LayoutBuilder(builder: (context, c) {
-          final narrow = c.maxWidth < 360;
+          final narrow = c.maxWidth < 300;
           final field = TextField(
             controller: usc,
             keyboardType: TextInputType.number,
@@ -259,18 +259,17 @@ class _UscSectionState extends State<UscSection> {
                 Text('Live Sync: ${_stamp(r.fetchedAt)} IST', style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 12.5)),
               ]),
             ),
-          ]),
-          const SizedBox(height: 10),
-          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-            IconButton(
-              tooltip: 'Fetch again',
-              onPressed: () => _rerun(r),
-              icon: Icon(Icons.refresh, color: C.mute),
-            ),
-            OutlinedButton(
-              onPressed: () => _openPortal(r.discom),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [const Text('Portal'), const SizedBox(width: 4), Icon(Icons.open_in_new, size: 14, color: C.blue)]),
-            ),
+            Column(children: [
+              IconButton(
+                tooltip: 'Fetch again',
+                onPressed: () => _rerun(r),
+                icon: Icon(Icons.refresh, color: C.mute),
+              ),
+              OutlinedButton(
+                onPressed: () => _openPortal(r.discom),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [const Text('Portal'), const SizedBox(width: 4), Icon(Icons.open_in_new, size: 14, color: C.blue)]),
+              ),
+            ]),
           ]),
           const SizedBox(height: 12),
           _infoBox(Icons.apartment_outlined, C.blue,

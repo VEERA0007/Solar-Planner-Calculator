@@ -52,7 +52,7 @@ class _SampleSource implements UscSource {
         meterNo: '00000000',
         category: '(B)(i)-Domestic',
         loadPhase: '0.24 kW · 1-Phase',
-        meterReading: '7724 → 7843 (31d)',
+        meterReading: '7724 to 7843 (31d)',
         billDate: '02-11-2026',
         dueDate: '16-11-2026',
         lastPaid: '27-02-2024',

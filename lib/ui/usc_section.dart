@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/calc.dart';
 import '../core/usc.dart';
+import '../core/usc_http.dart';
 import 'theme.dart';
 
 /// A request to show a saved or fetched USC record in the lookup.
@@ -28,10 +29,10 @@ class UscLink {
 /// USC lookup body: state and DISCOM interlink, USC field, fetch, official bill,
 /// 12-month averages, chart and DISCOM ledger. Placed inside the Monthly card.
 class UscSection extends StatefulWidget {
-  final UscSource source;
+  final UscSource? source;
   final void Function(UscRecord record) onApply;
   final UscLink link;
-  const UscSection({super.key, required this.link, required this.onApply, this.source = const UnconfiguredUscSource()});
+  const UscSection({super.key, required this.link, required this.onApply, this.source});
 
   @override
   State<UscSection> createState() => _UscSectionState();
@@ -61,6 +62,8 @@ Widget uscPill(String text, Color c, {bool solid = false}) => Container(
     );
 
 class _UscSectionState extends State<UscSection> {
+  UscSource get _source => widget.source ?? defaultUscSource();
+
   final usc = TextEditingController();
   final captcha = TextEditingController();
   final pasteCtl = TextEditingController();
@@ -155,7 +158,7 @@ class _UscSectionState extends State<UscSection> {
       setState(() => error = problem);
       return;
     }
-    final needsCaptcha = widget.source.needsCaptcha(d);
+    final needsCaptcha = _source.needsCaptcha(d);
     if (needsCaptcha && captcha.text.trim().isEmpty) {
       setState(() => error = 'Type the captcha shown by ${d.code}');
       return;
@@ -166,7 +169,7 @@ class _UscSectionState extends State<UscSection> {
       notice = null;
     });
     try {
-      final r = await widget.source.fetch(
+      final r = await _source.fetch(
         usc: cleanUscNumber(usc.text),
         discom: d,
         captcha: needsCaptcha ? captcha.text.trim() : null,
@@ -247,7 +250,7 @@ class _UscSectionState extends State<UscSection> {
         }
         return Row(children: [Expanded(child: field), const SizedBox(width: 10), button]);
       }),
-      if (widget.source.needsCaptcha(_d)) ...[
+      if (_source.needsCaptcha(_d)) ...[
         const SizedBox(height: 8),
         Row(children: [
           SizedBox(

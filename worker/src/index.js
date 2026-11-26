@@ -34,7 +34,7 @@ export default {
         return json({ error: 'TGNPDCL USC numbers are 8 digits.' }, 400);
       }
       try {
-        const bill = await fetchTgnpdclBill(usc);
+        const bill = await fetchTgnpdclBill(usc, fetch, body.debug === true);
         return json({
           consumerName: bill.consumerName,
           address: bill.address,
@@ -43,7 +43,9 @@ export default {
           bill: bill,
         });
       } catch (err) {
-        return json({ error: err.message || 'Lookup failed. No bill data was shown.' }, err.status || 500);
+        const out = { error: err.message || 'Lookup failed. No bill data was shown.' };
+        if (err.debug) out.debug = err.debug;
+        return json(out, err.status || 500);
       }
     }
     return json({ error: 'Not found' }, 404);

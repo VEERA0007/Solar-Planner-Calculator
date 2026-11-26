@@ -103,7 +103,7 @@ export function parseTgnpdclBill(html) {
 }
 
 /** Fetches the latest bill for [usc] (8 digits). Returns the parsed bill. */
-export async function fetchTgnpdclBill(usc, fetchImpl = fetch) {
+export async function fetchTgnpdclBill(usc, fetchImpl = fetch, debug = false) {
   let page;
   try {
     page = await fetchImpl(LOOKUP_PAGE, { headers: BROWSER_HEADERS });
@@ -136,5 +136,18 @@ export async function fetchTgnpdclBill(usc, fetchImpl = fetch) {
     throw err;
   }
   const html = await resp.text();
-  return parseTgnpdclBill(html);
+  try {
+    return parseTgnpdclBill(html);
+  } catch (err) {
+    if (debug) {
+      // Diagnostics only: status, cookie NAMES (never values), and the start of the reply text.
+      err.debug = {
+        pageStatus: page.status,
+        postStatus: resp.status,
+        cookieNames: cookies.map((c) => c.split('=')[0]),
+        replyStart: htmlToLines(html).slice(0, 25),
+      };
+    }
+    throw err;
+  }
 }

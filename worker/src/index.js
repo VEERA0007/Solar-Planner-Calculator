@@ -1,5 +1,5 @@
 // USC lookup backend. Contract: see lib/core/usc_http.dart.
-// Step 2 placeholder: the live DISCOM lookup is added after the portal captures arrive.
+import { fetchTgnpdclBill } from './tgnpdcl.js';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
@@ -19,7 +19,32 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === '/') return json({ service: 'usc-lookup', status: 'running' });
     if (url.pathname === '/api/usc/fetch' && request.method === 'POST') {
-      return json({ error: 'The live DISCOM lookup is not connected yet. No bill data was shown.' }, 501);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: 'Send the USC number and DISCOM as JSON.' }, 400);
+      }
+      const usc = String(body.usc ?? '').trim();
+      const discom = String(body.discom ?? '').trim();
+      if (discom !== 'TGNPDCL') {
+        return json({ error: `${discom || 'This DISCOM'} lookup is not connected yet. No bill data was shown.` }, 501);
+      }
+      if (!/^\d{8}$/.test(usc)) {
+        return json({ error: 'TGNPDCL USC numbers are 8 digits.' }, 400);
+      }
+      try {
+        const bill = await fetchTgnpdclBill(usc);
+        return json({
+          consumerName: bill.consumerName,
+          address: bill.address,
+          fetchedAt: new Date().toISOString(),
+          months: bill.months,
+          bill: bill,
+        });
+      } catch (err) {
+        return json({ error: err.message || 'Lookup failed. No bill data was shown.' }, err.status || 500);
+      }
     }
     return json({ error: 'Not found' }, 404);
   },

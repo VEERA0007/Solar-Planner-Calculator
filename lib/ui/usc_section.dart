@@ -66,6 +66,9 @@ class _UscSectionState extends State<UscSection> {
 
   final usc = TextEditingController();
   final captcha = TextEditingController();
+  /// Set when the portal asks for a security code: the id to send back and the image to show.
+  String? captchaId;
+  String? captchaImage;
   final pasteCtl = TextEditingController();
   UscRegion region = UscRegion.telangana;
   Discom? discom = kDiscoms.first;
@@ -138,6 +141,8 @@ class _UscSectionState extends State<UscSection> {
         discom = d;
         result = null;
         captcha.clear();
+        captchaId = null;
+        captchaImage = null;
         notice = 'Matched ${d.region.label} (${d.code}) by USC length.';
       } else if (candidates.length > 1 && (discom == null || !candidates.contains(discom))) {
         notice = 'This length fits ${candidates.map((d) => d.code).join(' or ')}. Choose one.';
@@ -159,8 +164,9 @@ class _UscSectionState extends State<UscSection> {
       return;
     }
     final needsCaptcha = _source.needsCaptcha(d);
-    if (needsCaptcha && captcha.text.trim().isEmpty) {
-      setState(() => error = 'Type the captcha shown by ${d.code}');
+    // First fetch sends no code: the backend answers with the image to type.
+    if (needsCaptcha && captchaId != null && captcha.text.trim().isEmpty) {
+      setState(() => error = 'Type the security code shown below');
       return;
     }
     setState(() {
@@ -172,14 +178,26 @@ class _UscSectionState extends State<UscSection> {
       final r = await _source.fetch(
         usc: cleanUscNumber(usc.text),
         discom: d,
-        captcha: needsCaptcha ? captcha.text.trim() : null,
+        captcha: needsCaptcha && captchaId != null ? captcha.text.trim() : null,
+        captchaId: needsCaptcha ? captchaId : null,
       );
       if (!mounted) return;
       setState(() {
         busy = false;
         result = r;
+        captchaId = null;
+        captchaImage = null;
       });
       await _saveToHistory(r);
+    } on UscCaptchaRequired catch (e) {
+      if (!mounted) return;
+      setState(() {
+        busy = false;
+        error = e.message;
+        captchaId = e.captchaId;
+        captchaImage = e.image;
+        captcha.clear();
+      });
     } on UscException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -252,6 +270,14 @@ class _UscSectionState extends State<UscSection> {
       }),
       if (_source.needsCaptcha(_d)) ...[
         const SizedBox(height: 8),
+        if (captchaImage != null && decodeCaptchaImage(captchaImage!) != null) ...[
+          Container(
+            height: 56,
+            alignment: Alignment.centerLeft,
+            child: Image.memory(decodeCaptchaImage(captchaImage!)!, fit: BoxFit.contain, gaplessPlayback: true),
+          ),
+          const SizedBox(height: 8),
+        ],
         Row(children: [
           SizedBox(
             width: 150,

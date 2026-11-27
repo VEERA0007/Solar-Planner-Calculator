@@ -18,7 +18,7 @@ class _SampleSource implements UscSource {
   bool needsCaptcha(Discom discom) => true;
 
   @override
-  Future<UscRecord> fetch({required String usc, required Discom discom, String? captcha}) async {
+  Future<UscRecord> fetch({required String usc, required Discom discom, String? captcha, String? captchaId}) async {
     const names = [
       'Nov 2025', 'Dec 2025', 'Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026',
       'Jun 2026', 'Jul 2026', 'Aug 2026', 'Sep 2026', 'Oct 2026', 'Nov 2026',

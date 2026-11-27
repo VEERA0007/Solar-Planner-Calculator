@@ -39,6 +39,7 @@ const kDiscoms = <Discom>[
   Discom('TGNPDCL', 'Northern Power Distribution (Warangal / Karimnagar area)', UscRegion.telangana, usclengths: [8]),
   Discom('APSPDCL', 'Southern Power Distribution (Andhra Pradesh)', UscRegion.andhra),
   Discom('APEPDCL', 'Eastern Power Distribution (Visakhapatnam)', UscRegion.andhra),
+  Discom('APCPDCL', 'Central Power Distribution (Vijayawada / Guntur)', UscRegion.andhra, usclengths: [13]),
   Discom('TPCODL', 'Central Odisha Distribution', UscRegion.odisha),
   Discom('TPNODL', 'Northern Odisha Distribution', UscRegion.odisha),
   Discom('TPSODL', 'Southern Odisha Distribution', UscRegion.odisha),
@@ -305,10 +306,19 @@ class UscException implements Exception {
   String toString() => message;
 }
 
+/// The portal wants the security code shown in [image] before it returns a bill.
+/// Type the code and fetch again with the same [captchaId].
+class UscCaptchaRequired extends UscException {
+  final String captchaId;
+  final String image;
+  const UscCaptchaRequired(String message, {required this.captchaId, required this.image}) : super(message);
+}
+
 /// Where the data comes from. The live portal connector implements this per DISCOM.
 abstract class UscSource {
   /// Throws [UscException] with a readable message when data can't be fetched.
-  Future<UscRecord> fetch({required String usc, required Discom discom, String? captcha});
+  /// [captchaId] comes back from a captcha challenge; send it with the typed [captcha].
+  Future<UscRecord> fetch({required String usc, required Discom discom, String? captcha, String? captchaId});
 
   /// True when this DISCOM needs the user to type the captcha shown by the portal.
   bool needsCaptcha(Discom discom);
@@ -322,7 +332,7 @@ class UnconfiguredUscSource implements UscSource {
   bool needsCaptcha(Discom discom) => true;
 
   @override
-  Future<UscRecord> fetch({required String usc, required Discom discom, String? captcha}) async {
+  Future<UscRecord> fetch({required String usc, required Discom discom, String? captcha, String? captchaId}) async {
     throw UscException('${discom.code} lookup is not connected yet. No bill data was shown.');
   }
 }

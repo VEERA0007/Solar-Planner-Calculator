@@ -84,6 +84,15 @@ export const DISCOMS = {
     route: 'planned',
     captcha: false,
   },
+  CSPDCL: {
+    name: 'Chhattisgarh State Power Distribution',
+    state: 'Chhattisgarh',
+    lengths: [7, 10],
+    digitsOnly: true,
+    hint: '10-digit BP number (7-digit legacy number; confirm on a bill before going live)',
+    route: 'planned',
+    captcha: false,
+  },
   CED: {
     name: 'Chandigarh Electricity Department',
     state: 'Chandigarh (UT)',

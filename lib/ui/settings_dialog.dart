@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import '../core/backend_service.dart';
 import '../core/i18n.dart';
 import '../core/store.dart';
 import '../core/update.dart';
@@ -20,8 +21,9 @@ class _SettingsDialog extends StatefulWidget {
 class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProviderStateMixin {
   late final TabController tabs = TabController(length: 3, vsync: this);
   late Prefs d; // draft
-  late final TextEditingController company, phone, note;
-  String version = '', updateMsg = '';
+  late final TextEditingController company, phone, note, backendUrl;
+  String version = '', updateMsg = '', backendStatus = '';
+  bool backendOk = false, testingBackend = false;
   UpdateInfo? pending;
   String currentLabel = '';
   bool checking = false;
@@ -36,6 +38,7 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
     company = TextEditingController(text: s.brand.company);
     phone = TextEditingController(text: s.brand.phone);
     note = TextEditingController(text: s.brand.note);
+    backendUrl = TextEditingController(text: s.prefs.backendUrl);
     PackageInfo.fromPlatform().then((i) {
       if (mounted) setState(() => version = '${i.version} (build ${i.buildNumber})');
     }).catchError((_) {});
@@ -47,6 +50,7 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
     company.dispose();
     phone.dispose();
     note.dispose();
+    backendUrl.dispose();
     super.dispose();
   }
 
@@ -60,7 +64,8 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
       ..autoSync = d.autoSync
       ..cloudAlerts = d.cloudAlerts
       ..dustDays = d.dustDays
-      ..textScale = d.textScale;
+      ..textScale = d.textScale
+      ..backendUrl = BackendService.cleanBaseUrl(backendUrl.text);
     s.brand
       ..company = company.text.trim()
       ..phone = phone.text.trim()
@@ -69,6 +74,21 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
     s.saveBrand();
     Navigator.pop(context);
     toast(context, tr(d.lang, 'saved'));
+  }
+
+  Future<void> _testBackend() async {
+    setState(() {
+      testingBackend = true;
+      backendStatus = 'Testing...';
+      backendOk = false;
+    });
+    final res = await BackendService.checkHealth(backendUrl.text);
+    if (!mounted) return;
+    setState(() {
+      testingBackend = false;
+      backendOk = res.ok;
+      backendStatus = res.message;
+    });
   }
 
   Future<void> _check() async {
@@ -211,13 +231,48 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
           ]),
         ),
         SectionCard(
+          icon: Icons.cloud_outlined,
+          iconColor: C.sky,
+          title: 'Live API Server (Optional)',
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(
+              'Optional Render / Cloud Run URL for live 4-state USC bill fetch, real-time tariff sync & manufacturer inverter login.',
+              style: TextStyle(color: C.mute, fontSize: 12.5),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: backendUrl,
+              keyboardType: TextInputType.url,
+              decoration: plainField().copyWith(hintText: 'https://your-service.onrender.com'),
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              OutlinedButton.icon(
+                onPressed: testingBackend ? null : _testBackend,
+                icon: const Icon(Icons.health_and_safety_outlined, size: 17),
+                label: Text(testingBackend ? 'Testing...' : 'Test Connection'),
+              ),
+              const SizedBox(width: 10),
+              if (backendStatus.isNotEmpty)
+                Expanded(
+                  child: Text(
+                    backendStatus,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: backendOk ? C.green : C.amber, fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                ),
+            ]),
+          ]),
+        ),
+        SectionCard(
           icon: Icons.receipt_long_outlined,
           title: t('company'),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             TextField(controller: company, decoration: plainField()),
             FieldLabel(t('company_phone')),
             TextField(controller: phone, keyboardType: TextInputType.phone, decoration: plainField()),
-            FieldLabel('Quote note'),
+            const FieldLabel('Quote note'),
             TextField(controller: note, maxLines: 2, decoration: plainField()),
           ]),
         ),

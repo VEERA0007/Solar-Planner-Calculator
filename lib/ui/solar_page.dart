@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/calc.dart';
 import '../core/store.dart';
+import 'inverter_sync_section.dart';
 import 'theme.dart';
 
 class SolarPage extends StatelessWidget {
@@ -27,6 +28,8 @@ class SolarPage extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
       children: [
         PageHead(state.t('solar'), '${state.site.city} · ${state.profile.panel.isEmpty ? 'Generation forecast for your plant' : state.profile.panel}'),
+        const InverterSyncSection(),
+        const SizedBox(height: 14),
         StatGrid([
           StatTile('Plant size', '${site.kwp} kWp'),
           StatTile("Today's yield", '${fmt1(daily)} kWh'),

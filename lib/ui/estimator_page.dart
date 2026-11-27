@@ -44,6 +44,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
   bool syncingTariff = false;
   bool uscRefreshingCaptcha = false;
   bool uscNeedsMobile = false;
+  bool uscPasteOpen = false;
   String uscMsg = '';
   String uscMeta = '';
   String uscEbillUrl = '';
@@ -56,6 +57,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
   final uscCtrl = TextEditingController();
   final captchaCtrl = TextEditingController();
   final uscMobileCtrl = TextEditingController();
+  final uscPasteCtrl = TextEditingController();
   final tariffOverride = TextEditingController();
   final roof = TextEditingController();
   final backup = TextEditingController();
@@ -101,7 +103,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
   @override
   void dispose() {
     for (final c in [
-      units, bill, uscCtrl, captchaCtrl, uscMobileCtrl, tariffOverride, roof, backup, inverterBrand,
+      units, bill, uscCtrl, captchaCtrl, uscMobileCtrl, uscPasteCtrl, tariffOverride, roof, backup, inverterBrand,
       name, phone, address, search, exWp, exQty, exInv, exGen, customCost,
       genKw, genUse, genTariff,
     ]) {
@@ -250,6 +252,30 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   void _recalc() {
     if (s.result != null) _calc(go: false);
+  }
+
+  void _applyPastedBills() {
+    final rows = BackendService.parsePastedBillRows(uscPasteCtrl.text);
+    if (rows.isEmpty) {
+      setState(() {
+        uscErr = true;
+        uscMsg = 'Could not detect monthly units. Example line: "Nov 2025 360 2580"';
+      });
+      return;
+    }
+    final withU = rows.where((r) => r.units > 0).toList();
+    final avgU = withU.isNotEmpty ? withU.fold(0.0, (a, r) => a + r.units) / withU.length : 0.0;
+    setState(() {
+      uscMonths = rows;
+      uscPasteOpen = false;
+      uscErr = false;
+      uscMeta = '';
+      if (avgU > 0) {
+        mode = 'units';
+        units.text = avgU.round().toString();
+      }
+      uscMsg = 'Imported ${rows.length} bill rows · Avg ${avgU.round()} kWh/mo';
+    });
   }
 
   Future<void> _refreshCaptcha() async {
@@ -822,6 +848,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
                 icon: const Icon(Icons.open_in_new, size: 15),
                 label: Text('Open ${s.discom.name} Portal', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
               ),
+              OutlinedButton.icon(
+                onPressed: () => setState(() => uscPasteOpen = !uscPasteOpen),
+                icon: const Icon(Icons.content_paste_go_outlined, size: 15),
+                label: Text(uscPasteOpen ? 'Hide Paste' : 'Paste Bills', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+              ),
               if (uscEbillUrl.isNotEmpty)
                 OutlinedButton.icon(
                   onPressed: () => _open(uscEbillUrl),
@@ -841,6 +872,24 @@ class _EstimatorPageState extends State<EstimatorPage> {
                   }),
                 ),
             ]),
+            if (uscPasteOpen) ...[
+              const SizedBox(height: 8),
+              TextField(
+                controller: uscPasteCtrl,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Paste portal bill rows (Month  Units  Amount)',
+                  hintText: 'Nov 2025  360  2480\nDec 2025  310  2090',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 6),
+              FilledButton(
+                onPressed: _applyPastedBills,
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), backgroundColor: C.blue),
+                child: const Text('Apply Pasted Monthly Units', style: TextStyle(fontWeight: FontWeight.w800)),
+              ),
+            ],
             if (uscMsg.isNotEmpty)
               _note(
                 uscErr ? Icons.info_outline : (uscCaptcha != null || uscNeedsMobile ? Icons.verified_user_outlined : Icons.check_circle_outline),

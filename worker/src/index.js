@@ -1,5 +1,8 @@
 // USC lookup backend. Contract: see lib/core/usc_http.dart.
 import { fetchTgnpdclBill } from './tgnpdcl.js';
+import { fetchTgspdclBill, generateTgspdclCaptcha } from './tgspdcl.js';
+import { DISCOMS, validateUsc } from './discoms.js';
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
@@ -14,10 +17,20 @@ function json(body, status = 200) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env = {}) {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === '/') return json({ service: 'usc-lookup', status: 'running' });
+
+    // Captcha for DISCOMs that need one (TGSPDCL). Returns {captchaId, image}.
+    if (url.pathname === '/api/usc/captcha' && request.method === 'GET') {
+      const discom = (url.searchParams.get('discom') || '').trim();
+      if (discom !== 'TGSPDCL') return json({ error: 'This DISCOM does not use a captcha.' }, 400);
+      const captcha = await generateTgspdclCaptcha(env.TGSPDCL_API_KEY || '');
+      if (!captcha) return json({ error: 'Could not load the security code from TGSPDCL. Try again.' }, 502);
+      return json(captcha);
+    }
+
     if (url.pathname === '/api/usc/fetch' && request.method === 'POST') {
       let body;
       try {
@@ -27,23 +40,46 @@ export default {
       }
       const usc = String(body.usc ?? '').trim();
       const discom = String(body.discom ?? '').trim();
-      if (discom !== 'TGNPDCL') {
-        return json({ error: `${discom || 'This DISCOM'} lookup is not connected yet. No bill data was shown.` }, 501);
+      const spec = DISCOMS[discom];
+      if (!spec) return json({ error: `Unknown DISCOM "${discom}".` }, 400);
+
+      const bad = validateUsc(discom, usc);
+      if (bad) return json({ error: bad }, 400);
+
+      if (spec.route !== 'live') {
+        return json(
+          { error: `${discom} live lookup is not connected yet. No bill data was shown. Your bill or the ${discom} portal still works.` },
+          501,
+        );
       }
-      if (!/^\d{8}$/.test(usc)) {
-        return json({ error: 'TGNPDCL USC numbers are 8 digits.' }, 400);
-      }
+
       try {
-        const bill = await fetchTgnpdclBill(usc, fetch, body.debug === true);
+        let bill;
+        if (discom === 'TGNPDCL') {
+          bill = await fetchTgnpdclBill(usc, fetch, body.debug === true);
+        } else if (discom === 'TGSPDCL') {
+          bill = await fetchTgspdclBill(usc, {
+            apiKey: env.TGSPDCL_API_KEY,
+            captchaId: body.captchaId ? String(body.captchaId) : undefined,
+            captchaAnswer: String(body.captcha ?? body.captchaAnswer ?? '').trim() || undefined,
+          });
+        } else {
+          return json({ error: `${discom} live lookup is not connected yet.` }, 501);
+        }
         return json({
           consumerName: bill.consumerName,
           address: bill.address,
           fetchedAt: new Date().toISOString(),
           months: bill.months,
-          bill: bill,
+          bill,
         });
       } catch (err) {
         const out = { error: err.message || 'Lookup failed. No bill data was shown.' };
+        if (err.status === 409 && err.captcha) {
+          out.captchaRequired = true;
+          out.captchaId = err.captcha.captchaId;
+          out.image = err.captcha.image;
+        }
         if (err.debug) out.debug = err.debug;
         return json(out, err.status || 500);
       }

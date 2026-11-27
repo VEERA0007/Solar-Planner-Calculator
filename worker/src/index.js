@@ -2,6 +2,7 @@
 import { fetchTgnpdclBill } from './tgnpdcl.js';
 import { fetchTgspdclBill, generateTgspdclCaptcha } from './tgspdcl.js';
 import { DISCOMS, validateUsc } from './discoms.js';
+import { handleInverterPortalSync, handleInverterPortalPing, setInverterEnv } from './inverter/cloudPortalSync.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -21,6 +22,23 @@ export default {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     if (url.pathname === '/') return json({ service: 'usc-lookup', status: 'running' });
+
+    // Inverter cloud sync. Credentials arrive per request and are used only to log in
+    // to the manufacturer portal. They are not stored or logged by the Worker.
+    if (url.pathname === '/api/inverter/portal-sync' || url.pathname === '/api/inverter/portal-ping') {
+      if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ ok: false, error: 'Send the inverter login details as JSON.' }, 400);
+      }
+      setInverterEnv(env);
+      const out = url.pathname.endsWith('portal-ping')
+        ? await handleInverterPortalPing(body)
+        : await handleInverterPortalSync(body);
+      return json(out, 200);
+    }
 
     // Captcha for DISCOMs that need one (TGSPDCL). Returns {captchaId, image}.
     if (url.pathname === '/api/usc/captcha' && request.method === 'GET') {

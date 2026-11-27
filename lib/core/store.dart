@@ -1,5 +1,6 @@
 import 'service_data.dart';
 import 'appliance_data.dart';
+import 'backend_service.dart';
 import 'estimator_data.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -27,8 +28,10 @@ class Site {
     this.tariff = 7.2,
     this.auto = true,
   });
+
   Map<String, dynamic> toJson() =>
       {'city': city, 'label': label, 'lat': lat, 'lon': lon, 'kwp': kwp, 'tariff': tariff, 'auto': auto};
+
   factory Site.fromJson(Map<String, dynamic> j) {
     final d = Site();
     double n(String k, double def) => (j[k] is num) ? (j[k] as num).toDouble() : def;
@@ -43,7 +46,6 @@ class Site {
     );
   }
 }
-
 
 /// Owner and plant details (Profile dialog). System capacity lives in [Site.kwp].
 class Profile {
@@ -66,11 +68,13 @@ class Profile {
     this.roofSqft = 700,
     this.warranty = 25,
   });
+
   Map<String, dynamic> toJson() => {
         'name': name, 'serviceNo': serviceNo, 'mobile': mobile, 'pin': pin, 'email': email,
         'address': address, 'roofType': roofType, 'panel': panel, 'inverter': inverter,
         'commission': commission, 'helpline': helpline, 'roofSqft': roofSqft, 'warranty': warranty,
       };
+
   factory Profile.fromJson(Map<String, dynamic> j) {
     final d = Profile();
     String t(String k, String def) => (j[k] as String?) ?? def;
@@ -107,6 +111,8 @@ class Prefs {
   bool battery, autoSync, cloudAlerts;
   int dustDays;
   double textScale; // user text/screen size on top of the automatic fit (1.0 = auto)
+  String backendUrl; // optional Render / Cloud Run proxy URL for live DISCOM & Inverter portal sync
+
   Prefs({
     this.lang = 'en',
     this.stateId = 'telangana',
@@ -118,11 +124,15 @@ class Prefs {
     this.cloudAlerts = true,
     this.dustDays = 30,
     this.textScale = 1.0,
+    this.backendUrl = '',
   });
+
   Map<String, dynamic> toJson() => {
         'lang': lang, 'stateId': stateId, 'discomId': discomId, 'category': category, 'dark': dark,
-        'battery': battery, 'autoSync': autoSync, 'cloudAlerts': cloudAlerts, 'dustDays': dustDays, 'textScale': textScale,
+        'battery': battery, 'autoSync': autoSync, 'cloudAlerts': cloudAlerts, 'dustDays': dustDays,
+        'textScale': textScale, 'backendUrl': backendUrl,
       };
+
   factory Prefs.fromJson(Map<String, dynamic> j) {
     final d = Prefs();
     return Prefs(
@@ -136,6 +146,7 @@ class Prefs {
       cloudAlerts: (j['cloudAlerts'] as bool?) ?? true,
       dustDays: (j['dustDays'] as num?)?.toInt() ?? 30,
       textScale: ((j['textScale'] as num?)?.toDouble() ?? 1.0).clamp(.8, 1.4),
+      backendUrl: (j['backendUrl'] as String?) ?? '',
     );
   }
 }
@@ -147,7 +158,9 @@ class Brand {
     this.phone = '',
     this.note = 'Estimate only. Final design, cost and subsidy subject to site survey and DISCOM approval.',
   });
+
   Map<String, dynamic> toJson() => {'company': company, 'phone': phone, 'note': note};
+
   factory Brand.fromJson(Map<String, dynamic> j) {
     final d = Brand();
     return Brand(
@@ -163,9 +176,19 @@ class Appliance {
   double watts, hours;
   int qty, start;
   bool backup; // keep running on battery during a power cut
-  Appliance({required this.id, required this.name, required this.watts, required this.qty, required this.hours, required this.start, this.backup = false});
+  Appliance({
+    required this.id,
+    required this.name,
+    required this.watts,
+    required this.qty,
+    required this.hours,
+    required this.start,
+    this.backup = false,
+  });
+
   Map<String, dynamic> toJson() =>
       {'id': id, 'name': name, 'watts': watts, 'qty': qty, 'hours': hours, 'start': start, 'backup': backup};
+
   factory Appliance.fromJson(Map<String, dynamic> j) => Appliance(
         id: (j['id'] as String?) ?? DateTime.now().microsecondsSinceEpoch.toString(),
         name: (j['name'] as String?) ?? 'Appliance',
@@ -228,6 +251,10 @@ class AppState extends ChangeNotifier {
   ApplCfg appl = ApplCfg();
   Rates rates = const Rates();
   List<ApplRecord> applHistory = [];
+  InverterConfig inverterCfg = InverterConfig();
+  InverterSnapshot? inverterSnap;
+  List<UscHistoryItem> uscHistory = [];
+
   /// Set by Appliance Analysis; the Estimator picks it up when it opens.
   EstimateInput? estimatePush;
 
@@ -259,9 +286,9 @@ class AppState extends ChangeNotifier {
       final b = obj('brand');
       if (b != null) brand = Brand.fromJson(b);
       final a = list('appliances');
-      appliances = a != null
-          ? a.whereType<Map>().map((e) => Appliance.fromJson(e.cast<String, dynamic>())).toList()
-          : _defaultAppliances();
+      if (a != null) {
+        appliances = a.whereType<Map>().map((e) => Appliance.fromJson(e.cast<String, dynamic>())).toList();
+      }
       final r = list('records');
       if (r != null) {
         records = r.whereType<Map>().map((e) => SavedRecord.fromJson(e.cast<String, dynamic>())).toList();
@@ -274,6 +301,12 @@ class AppState extends ChangeNotifier {
       if (rt != null) rates = Rates.fromJson(rt);
       final ah = list('appl_hist');
       if (ah != null) applHistory = ah.whereType<Map>().map((e) => ApplRecord.fromJson(e.cast<String, dynamic>())).toList();
+      final ic = obj('inverter_cfg');
+      if (ic != null) inverterCfg = InverterConfig.fromJson(ic);
+      final isnp = obj('inverter_snap');
+      if (isnp != null) inverterSnap = InverterSnapshot.fromJson(isnp);
+      final uh = list('usc_history');
+      if (uh != null) uscHistory = uh.whereType<Map>().map((e) => UscHistoryItem.fromJson(e.cast<String, dynamic>())).toList();
       final pr = obj('profile');
       if (pr != null) profile = Profile.fromJson(pr);
       final pf = obj('prefs');
@@ -321,12 +354,39 @@ class AppState extends ChangeNotifier {
   void saveBrand() { _save('brand', brand.toJson()); notifyListeners(); }
   void saveAppl() { _save('appl', appl.toJson()); notifyListeners(); }
   void saveRates() { _save('appl_rates', rates.toJson()); notifyListeners(); }
+
   void saveApplHistory() {
     if (applHistory.length > 100) applHistory = applHistory.sublist(0, 100);
     _save('appl_hist', applHistory.map((e) => e.toJson()).toList());
     notifyListeners();
   }
+
+  void saveInverter() {
+    _save('inverter_cfg', inverterCfg.toJson());
+    if (inverterSnap != null) {
+      _save('inverter_snap', inverterSnap!.toJson());
+    } else {
+      _p?.remove('inverter_snap');
+    }
+    notifyListeners();
+  }
+
+  void clearInverter() {
+    inverterSnap = null;
+    _p?.remove('inverter_snap');
+    notifyListeners();
+  }
+
+  void addUscHistory(UscHistoryItem item) {
+    uscHistory.removeWhere((x) => x.usc == item.usc && x.stateId == item.stateId);
+    uscHistory.insert(0, item);
+    if (uscHistory.length > 20) uscHistory = uscHistory.sublist(0, 20);
+    _save('usc_history', uscHistory.map((e) => e.toJson()).toList());
+    notifyListeners();
+  }
+
   void saveAppliances() { _save('appliances', appliances.map((e) => e.toJson()).toList()); notifyListeners(); }
+
   void saveServices() {
     services.sort((a, b) => b.date.compareTo(a.date));
     _save('services', services.map((e) => e.toJson()).toList());
@@ -337,8 +397,8 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
   }
-  void saveRecords() { _save('records', records.map((e) => e.toJson()).toList()); notifyListeners(); }
 
+  void saveRecords() { _save('records', records.map((e) => e.toJson()).toList()); notifyListeners(); }
   void setTab(int i) { tab = i; notifyListeners(); }
 
   /// Estimator result feeds the Home dashboard (plant size and tariff).
@@ -394,7 +454,6 @@ class AppState extends ChangeNotifier {
   // ----- tariffs & derived links between Settings, Profile and Home -----
   String get lang => prefs.lang;
   String t(String key) => tr(prefs.lang, key);
-
   StateTariff get st => book!.byId(prefs.stateId);
   Discom get discom => st.discoms.firstWhere((d) => d.id == prefs.discomId, orElse: () => st.discoms.first);
   CategoryTariff get tariffCat => st.cat(prefs.category);
@@ -402,9 +461,10 @@ class AppState extends ChangeNotifier {
   /// Monthly consumption used to pick the slab (appliance load x 30 days).
   double get monthlyUnits => dailyLoad * 30;
 
-  /// Price of the next unit at the current consumption: not editable.
+  /// Price of the next unit at the current consumption.
   double get unitPrice => book == null ? site.tariff : tariffCat.marginal(monthlyUnits);
   String get slabText => book == null ? '' : '${tariffCat.label} (${tariffCat.slabLabel(monthlyUnits)})';
+
   /// Daily kWh per kWp from the location's long-term sun hours.
   double get locationYield => (monthly?.annual ?? (fallbackPsh(site.lat).reduce((a, b) => a + b) / 12)) * pr;
   double get pr => (book == null ? 79.2 : st.pr) / 100;
@@ -492,6 +552,9 @@ class AppState extends ChangeNotifier {
     appl = ApplCfg();
     rates = const Rates();
     applHistory = [];
+    inverterCfg = InverterConfig();
+    inverterSnap = null;
+    uscHistory = [];
     estimatePush = null;
     lastCleaned = null;
     services = [];

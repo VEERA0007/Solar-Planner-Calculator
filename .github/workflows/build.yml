@@ -70,11 +70,11 @@ jobs:
       - run: flutter pub get
       - name: Build smaller 64-bit APK (modern phones)
         run: |
-          flutter build apk --release --target-platform android-arm64 --build-name="$VERSION" --build-number="$BUILD"
+          flutter build apk --dart-define=USC_BACKEND_URL=https://usc-lookup.veera-official1997.workers.dev --release --target-platform android-arm64 --build-name="$VERSION" --build-number="$BUILD"
           cp build/app/outputs/flutter-apk/app-release.apk "SolarPlanner-$VERSION-build-$BUILD-arm64.apk"
       - name: Build universal APK (32-bit and 64-bit phones)
         run: |
-          flutter build apk --release --target-platform android-arm,android-arm64 --build-name="$VERSION" --build-number="$BUILD"
+          flutter build apk --dart-define=USC_BACKEND_URL=https://usc-lookup.veera-official1997.workers.dev --release --target-platform android-arm,android-arm64 --build-name="$VERSION" --build-number="$BUILD"
           cp build/app/outputs/flutter-apk/app-release.apk "SolarPlanner-$VERSION-build-$BUILD.apk"
       - uses: actions/upload-artifact@v4
         with:
@@ -104,7 +104,7 @@ jobs:
       - run: flutter pub get
       - name: Build
         shell: bash
-        run: flutter build windows --release --build-name="$VERSION" --build-number="$BUILD"
+        run: flutter build windows --dart-define=USC_BACKEND_URL=https://usc-lookup.veera-official1997.workers.dev --release --build-name="$VERSION" --build-number="$BUILD"
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "SolarPlanner-$env:VERSION-build-$env:BUILD-windows.zip"
@@ -133,7 +133,7 @@ jobs:
         run: tools/scaffold.sh web
       - run: flutter pub get
       - name: Build
-        run: flutter build web --release --base-href "/${{ github.event.repository.name }}/" --build-name="$VERSION" --build-number="$BUILD"
+        run: flutter build web --dart-define=USC_BACKEND_URL=https://usc-lookup.veera-official1997.workers.dev --release --base-href "/${{ github.event.repository.name }}/" --build-name="$VERSION" --build-number="$BUILD"
       - name: Zip
         run: cd build/web && zip -qr "../../SolarPlanner-$VERSION-build-$BUILD-web.zip" .
       - uses: actions/upload-artifact@v4
@@ -161,7 +161,7 @@ jobs:
         run: tools/scaffold.sh ios
       - run: flutter pub get
       - name: Build (no code signing)
-        run: flutter build ios --release --no-codesign --build-name="$VERSION" --build-number="$BUILD"
+        run: flutter build ios --dart-define=USC_BACKEND_URL=https://usc-lookup.veera-official1997.workers.dev --release --no-codesign --build-name="$VERSION" --build-number="$BUILD"
       - name: Package unsigned IPA
         run: |
           mkdir Payload

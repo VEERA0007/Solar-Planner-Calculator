@@ -759,25 +759,12 @@ class BackendService {
     };
 
     final encodedUsc = Uri.encodeComponent(usc);
-    http.Response? dlResp;
-    http.Response? histResp;
-
-    try {
-      final results = await Future.wait<http.Response?>([
-        http
-            .get(Uri.parse('https://tgsouthernpower.org/api/public/bill/download/$encodedUsc'), headers: hdrs)
-            .timeout(const Duration(seconds: 12))
-            .then<http.Response?>((r) => r)
-            .catchError((_) => null),
-        http
-            .get(Uri.parse('https://tgsouthernpower.org/api/public/bill/history?uscno=$encodedUsc'), headers: hdrs)
-            .timeout(const Duration(seconds: 12))
-            .then<http.Response?>((r) => r)
-            .catchError((_) => null),
-      ]);
-      dlResp = results[0];
-      histResp = results[1];
-    } catch (_) {}
+    final results = await Future.wait<http.Response?>([
+      _safeGet(Uri.parse('https://tgsouthernpower.org/api/public/bill/download/$encodedUsc'), hdrs),
+      _safeGet(Uri.parse('https://tgsouthernpower.org/api/public/bill/history?uscno=$encodedUsc'), hdrs),
+    ]);
+    final dlResp = results[0];
+    final histResp = results[1];
 
     // Parse 12-month history array
     final history = <UscMonthEntry>[];
@@ -1414,10 +1401,18 @@ class BackendService {
     return cookies.join('; ');
   }
 
+  static Future<http.Response?> _safeGet(Uri uri, Map<String, String> headers) async {
+    try {
+      return await http.get(uri, headers: headers).timeout(const Duration(seconds: 12));
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Approximates Telangana TGERC domestic monthly units from a live demand ₹ amount
   /// when a payment gateway only returns rupee demand.
   static double _estimateTelanganaUnits(double billInr) {
-    if (billInr <= 120) return (billInr / 2.6).clamp(10, 50);
+    if (billInr <= 120) return (billInr / 2.6).clamp(10.0, 50.0).toDouble();
     if (billInr <= 800) return (billInr / 4.8).roundToDouble();
     if (billInr <= 2500) return (billInr / 7.2).roundToDouble();
     return (billInr / 8.8).roundToDouble();

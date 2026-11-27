@@ -54,6 +54,12 @@ class InverterSyncResult {
   final double? lifetimeKwh;
   final String? syncedAtIst;
   final String? statusNote;
+  /// Local date of the reading (yyyy-mm-dd, device time).
+  final String? dateKey;
+  final double? todayUsageKwh;
+  final double? todayExportKwh;
+  final double? todayImportKwh;
+  final bool hasSmartMeter;
 
   const InverterSyncResult({
     required this.ok,
@@ -68,6 +74,11 @@ class InverterSyncResult {
     this.lifetimeKwh,
     this.syncedAtIst,
     this.statusNote,
+    this.dateKey,
+    this.todayUsageKwh,
+    this.todayExportKwh,
+    this.todayImportKwh,
+    this.hasSmartMeter = false,
   });
 
   /// Used when the request itself failed. Shows the message and no data.
@@ -102,6 +113,11 @@ class InverterSyncResult {
       lifetimeKwh: _num(telemetry['lifetimeKwh']),
       syncedAtIst: telemetry['syncedAtIst']?.toString(),
       statusNote: telemetry['statusNote']?.toString(),
+      dateKey: telemetry['dateKey']?.toString(),
+      todayUsageKwh: _num(telemetry['todayUsageKwh']),
+      todayExportKwh: _num(telemetry['todayExportKwh']),
+      todayImportKwh: _num(telemetry['todayImportKwh']),
+      hasSmartMeter: telemetry['hasSmartMeter'] == true,
     );
   }
 

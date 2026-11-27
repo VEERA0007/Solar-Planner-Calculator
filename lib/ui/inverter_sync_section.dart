@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/inverter_energy.dart';
 import '../core/inverter_sync.dart';
 import 'theme.dart';
 
@@ -100,6 +101,8 @@ class _InverterSyncSectionState extends State<InverterSyncSection> {
       // Keep the password while the account needs a plant pick, so the next tap can reuse it.
       if (r.ok) pass.clear();
     });
+    // Keep the reading on this phone for the energy panel and the daily log.
+    if (r.ok) InverterStore.recordSync(brand, mode.name, r);
   }
 
   @override

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/calc.dart';
 import '../core/store.dart';
+import 'energy_panel.dart';
 import 'inverter_sync_section.dart';
 import 'theme.dart';
 
@@ -29,6 +30,14 @@ class SolarPage extends StatelessWidget {
       children: [
         PageHead(state.t('solar'), '${state.site.city} · ${state.profile.panel.isEmpty ? 'Generation forecast for your plant' : state.profile.panel}'),
         const InverterSyncSection(),
+        const SizedBox(height: 14),
+        EnergyPanel(
+          capacityKwp: site.kwp.toDouble(),
+          electricityRate: site.tariff.toDouble(),
+          latitude: site.lat.toDouble(),
+          longitude: site.lon.toDouble(),
+          psh: state.irr?.psh,
+        ),
         const SizedBox(height: 14),
         StatGrid([
           StatTile('Plant size', '${site.kwp} kWp'),

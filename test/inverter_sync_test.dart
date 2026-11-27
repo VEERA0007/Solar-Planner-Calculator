@@ -46,4 +46,19 @@ void main() {
     final ids = kInverterBrands.map((b) => b.id).toList();
     expect(ids.toSet().length, ids.length);
   });
+
+  test('logger address becomes status-page candidates and never keeps a login', () {
+    expect(HttpInverterSync.loggerCandidates('192.168.1.50'), [
+      'http://192.168.1.50/status.html',
+      'http://192.168.1.50/status_a.html',
+      'http://192.168.1.50/inverter.json',
+    ]);
+    expect(HttpInverterSync.loggerCandidates('http://10.10.100.254/status.html'), ['http://10.10.100.254/status.html']);
+    expect(HttpInverterSync.loggerCandidates('admin:admin@192.168.1.50'), isNull);
+    expect(HttpInverterSync.loggerCandidates('   '), isNull);
+  });
+
+  test('connection modes are the three the backend supports', () {
+    expect(InverterConnectMode.values.length, 3);
+  });
 }

@@ -3,6 +3,7 @@ import { fetchTgnpdclBill } from './tgnpdcl.js';
 import { fetchTgspdclBill, generateTgspdclCaptcha } from './tgspdcl.js';
 import { DISCOMS, validateUsc } from './discoms.js';
 import { handleInverterPortalSync, handleInverterPortalPing, setInverterEnv } from './inverter/cloudPortalSync.ts';
+import { handleBridgeSync, handleParseLogger } from './inverter/bridge.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -25,6 +26,18 @@ export default {
 
     // Inverter cloud sync. Credentials arrive per request and are used only to log in
     // to the manufacturer portal. They are not stored or logged by the Worker.
+    if (url.pathname === '/api/inverter/bridge-sync' || url.pathname === '/api/inverter/parse-logger') {
+      if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ ok: false, error: 'Send the logger or bridge details as JSON.' }, 400);
+      }
+      const out = url.pathname.endsWith('bridge-sync') ? await handleBridgeSync(body) : handleParseLogger(body);
+      return json(out.body, out.status);
+    }
+
     if (url.pathname === '/api/inverter/portal-sync' || url.pathname === '/api/inverter/portal-ping') {
       if (request.method !== 'POST') return json({ error: 'Use POST.' }, 405);
       let body;

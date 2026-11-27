@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../core/inverter_sync.dart';
 import 'theme.dart';
 
-/// Live inverter sync: log in to the brand's cloud portal through the backend and show
-/// today's generation. Credentials stay in this widget's memory only. They are not saved.
+/// Live inverter and data-logger sync in three modes: cloud portal login, local Wi-Fi logger,
+/// or HTTPS bridge. Passwords stay in this widget's memory only and are never saved.
 class InverterSyncSection extends StatefulWidget {
   final InverterSyncSource? source;
   const InverterSyncSection({super.key, this.source});
@@ -14,9 +14,11 @@ class InverterSyncSection extends StatefulWidget {
 }
 
 class _InverterSyncSectionState extends State<InverterSyncSection> {
+  InverterConnectMode mode = InverterConnectMode.cloudPortal;
   String brand = kInverterBrands.first.id;
   final user = TextEditingController();
   final pass = TextEditingController();
+  final address = TextEditingController();
   bool busy = false;
   InverterSyncResult? result;
   String? stationId;
@@ -27,7 +29,16 @@ class _InverterSyncSectionState extends State<InverterSyncSection> {
   void dispose() {
     user.dispose();
     pass.dispose();
+    address.dispose();
     super.dispose();
+  }
+
+  void _setMode(InverterConnectMode m) {
+    setState(() {
+      mode = m;
+      result = null;
+      stationId = null;
+    });
   }
 
   Future<void> _sync({String? station}) async {
@@ -36,20 +47,51 @@ class _InverterSyncSectionState extends State<InverterSyncSection> {
       setState(() => result = InverterSyncResult.failed('The sync server is not set up in this build.'));
       return;
     }
-    if (user.text.trim().isEmpty || pass.text.isEmpty) {
+    final needsAddress = mode != InverterConnectMode.cloudPortal;
+    if (needsAddress && address.text.trim().isEmpty) {
+      setState(() => result = InverterSyncResult.failed(mode == InverterConnectMode.localLogger
+          ? 'Enter the logger address, for example 192.168.1.50.'
+          : 'Enter the HTTPS bridge URL.'));
+      return;
+    }
+    if (mode == InverterConnectMode.cloudPortal && (user.text.trim().isEmpty || pass.text.isEmpty)) {
       setState(() => result = InverterSyncResult.failed('Enter your portal username and password.'));
       return;
     }
+
     setState(() {
       busy = true;
       result = null;
     });
-    final r = await src.sync(
-      brand: brand,
-      username: user.text.trim(),
-      password: pass.text,
-      stationId: station ?? stationId,
-    );
+
+    final InverterSyncResult r;
+    switch (mode) {
+      case InverterConnectMode.cloudPortal:
+        r = await src.sync(
+          brand: brand,
+          username: user.text.trim(),
+          password: pass.text,
+          stationId: station ?? stationId,
+        );
+        break;
+      case InverterConnectMode.localLogger:
+        r = await src.syncLocalLogger(
+          brand: brand,
+          loggerAddress: address.text,
+          username: user.text,
+          password: pass.text,
+        );
+        break;
+      case InverterConnectMode.bridge:
+        r = await src.syncBridge(
+          brand: brand,
+          bridgeUrl: address.text,
+          username: user.text,
+          password: pass.text,
+        );
+        break;
+    }
+
     if (!mounted) return;
     setState(() {
       busy = false;
@@ -69,14 +111,22 @@ class _InverterSyncSectionState extends State<InverterSyncSection> {
         Row(children: [
           Icon(Icons.cloud_sync_outlined, color: C.amber),
           const SizedBox(width: 8),
-          Expanded(child: Text('Live from inverter portal', style: title)),
+          Expanded(child: Text('Live from inverter or data logger', style: title)),
         ]),
         const SizedBox(height: 4),
         Text(
-          'Log in to your inverter brand portal. Today\'s generation is read once. The password is not saved.',
+          'Read today\'s generation from your inverter. Logins are used once and not saved.',
           style: TextStyle(color: C.mute, fontSize: 12.5),
         ),
         const SizedBox(height: 12),
+        DropdownButtonFormField<InverterConnectMode>(
+          initialValue: mode,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'How to connect', isDense: true),
+          items: [for (final m in InverterConnectMode.values) DropdownMenuItem(value: m, child: Text(m.label, overflow: TextOverflow.ellipsis))],
+          onChanged: busy ? null : (v) => _setMode(v ?? mode),
+        ),
+        const SizedBox(height: 10),
         DropdownButtonFormField<String>(
           initialValue: brand,
           isExpanded: true,
@@ -85,17 +135,49 @@ class _InverterSyncSectionState extends State<InverterSyncSection> {
           onChanged: busy ? null : (v) => setState(() => brand = v ?? brand),
         ),
         const SizedBox(height: 10),
+        if (mode == InverterConnectMode.localLogger)
+          TextField(
+            controller: address,
+            enabled: !busy,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'Logger address on home Wi-Fi',
+              hintText: '192.168.1.50',
+              helperText: 'Find it in your router\'s device list, or use 10.10.100.254 in access-point mode.',
+              isDense: true,
+            ),
+          ),
+        if (mode == InverterConnectMode.bridge)
+          TextField(
+            controller: address,
+            enabled: !busy,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'HTTPS bridge URL',
+              hintText: 'https://solar.yourdomain.com/status.html',
+              helperText: 'Must be https and reachable from the internet. Local IPs will not work here.',
+              isDense: true,
+            ),
+          ),
+        if (mode != InverterConnectMode.cloudPortal) const SizedBox(height: 10),
         TextField(
           controller: user,
           enabled: !busy,
-          decoration: const InputDecoration(labelText: 'Portal username or email', isDense: true),
+          decoration: InputDecoration(
+            labelText: mode == InverterConnectMode.cloudPortal ? 'Portal username or email' : 'Login (optional)',
+            helperText: mode == InverterConnectMode.localLogger ? 'Solis sticks often use admin / admin.' : null,
+            isDense: true,
+          ),
         ),
         const SizedBox(height: 10),
         TextField(
           controller: pass,
           enabled: !busy,
           obscureText: true,
-          decoration: const InputDecoration(labelText: 'Portal password', isDense: true),
+          decoration: InputDecoration(
+            labelText: mode == InverterConnectMode.cloudPortal ? 'Portal password' : 'Password (optional)',
+            isDense: true,
+          ),
         ),
         const SizedBox(height: 12),
         Row(children: [
@@ -118,7 +200,7 @@ class _InverterSyncSectionState extends State<InverterSyncSection> {
   Widget _result(InverterSyncResult r) {
     if (!r.ok && r.needsPlant && r.plants.isNotEmpty) {
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('This account has ${r.plants.length} plants. Pick one:', style: TextStyle(fontWeight: FontWeight.w700)),
+        Text('This account has ${r.plants.length} plants. Pick one:', style: const TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         for (final p in r.plants)
           Padding(
@@ -155,8 +237,7 @@ class _InverterSyncSectionState extends State<InverterSyncSection> {
             Text(v, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
           ]),
         ),
-      if (r.statusNote != null && r.statusNote!.isNotEmpty)
-        Text(r.statusNote!, style: TextStyle(color: C.mute, fontSize: 12)),
+      if (r.statusNote != null && r.statusNote!.isNotEmpty) Text(r.statusNote!, style: TextStyle(color: C.mute, fontSize: 12)),
     ]);
   }
 }

@@ -28,6 +28,9 @@ extra = '''
     </queries>'''
 if 'android.permission.ACCESS_COARSE_LOCATION' not in s:
     s = re.sub(r'(<manifest[^>]*>)', lambda m: m.group(1) + extra, s, count=1)
+# Local Wi-Fi logger: the phone reads http://192.168.x.x on the home network.
+if 'usesCleartextTraffic' not in s:
+    s = re.sub(r'<application\b', '<application android:usesCleartextTraffic="true"', s, count=1)
 open(p, 'w', encoding='utf-8').write(s)
 
 # ---- signing: one fixed key for every build so updates install over old versions ----
@@ -75,6 +78,9 @@ if [[ "$PLATFORMS" == *ios* ]]; then
 python3 - <<'PY'
 p = 'ios/Runner/Info.plist'
 s = open(p, encoding='utf-8').read()
+if 'NSAllowsLocalNetworking' not in s:
+    s = s.replace('</dict>\n</plist>', '\t<key>NSAppTransportSecurity</key>\n\t<dict>\n\t\t<key>NSAllowsLocalNetworking</key>\n\t\t<true/>\n\t</dict>\n\t<key>NSLocalNetworkUsageDescription</key>\n\t<string>Reads your inverter data logger on your home Wi-Fi.</string>\n</dict>\n</plist>')
+    open(p, 'w', encoding='utf-8').write(s)
 if 'NSLocationWhenInUseUsageDescription' not in s:
     s = s.replace('</dict>\n</plist>', '\t<key>NSLocationWhenInUseUsageDescription</key>\n\t<string>Your location is used to show local sunlight, tariffs and the right grid.</string>\n</dict>\n</plist>')
     open(p, 'w', encoding='utf-8').write(s)

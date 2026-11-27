@@ -103,7 +103,7 @@ export function parseTgnpdclBill(html) {
 }
 
 /** Fetches the latest bill for [usc] (8 digits). Returns the parsed bill. */
-export async function fetchTgnpdclBill(usc, fetchImpl = fetch, debug = false) {
+async function fetchTgnpdclHtml(usc, fetchImpl = fetch, debug = false) {
   let page;
   try {
     page = await fetchImpl(LOOKUP_PAGE, { headers: BROWSER_HEADERS });
@@ -150,4 +150,109 @@ export async function fetchTgnpdclBill(usc, fetchImpl = fetch, debug = false) {
     }
     throw err;
   }
+}
+
+const num = (v) => {
+  const n = parseFloat(String(v ?? '').replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+};
+const str = (v) => (v !== null && v !== undefined && String(v).trim() ? String(v).trim() : null);
+
+/** Ported from the reference server.ts (fetchTgnpdclLiveData): the bill-pay gateway JSON. No units in this reply. */
+export async function fetchEasebuzzBill(usc, fetchImpl = fetch) {
+  let resp;
+  try {
+    resp = await fetchImpl('https://layer.easebuzz.in/tgnpdcl/api/v1/fetchbilldetails/', {
+      method: 'POST',
+      headers: {
+        ...BROWSER_HEADERS,
+        'Content-Type': 'application/json',
+        Origin: 'https://vas.easebuzz.in',
+        Referer: 'https://vas.easebuzz.in/TGNPDCL/Billpay',
+      },
+      body: JSON.stringify({ service_number: usc }),
+    });
+  } catch {
+    const err = new Error('The TGNPDCL bill gateway could not be reached.');
+    err.status = 502;
+    throw err;
+  }
+  const json = await resp.json().catch(() => null);
+  if (!json) {
+    const err = new Error('The TGNPDCL bill gateway sent an unreadable reply.');
+    err.status = 502;
+    throw err;
+  }
+  if (json.success === false || !json.data) {
+    const err = new Error(
+      `No active consumer found on TGNPDCL for USCNO "${usc}" (${json.message || 'Invalid USCNO'}). Check the 8-digit number on your TGNPDCL bill.`,
+    );
+    err.status = 404;
+    throw err;
+  }
+  const d = json.data;
+  return {
+    consumerName: str(d.name),
+    scNo: str(d.scno),
+    eroName: str(d.eroName),
+    area: str(d.area),
+    category: str(d.customerCatetogy ?? d.customerCategory),
+    billDate: str(d.billDate),
+    dueDate: str(d.billDueDate),
+    disconnectionDate: str(d.billDisconnectionDate),
+    totalAmount: num(d.billTotalAmount),
+    currentMonthDemand: num(d.currentMonthDemand),
+    arrears: num(d.arrearAmount),
+    paymentDone: str(d.paymentDone),
+    billId: str(d.billId ?? d.txnId),
+  };
+}
+
+/** Public entry point: gateway JSON for identity and amounts, HTML bill for kWh units when it parses. */
+export async function fetchTgnpdclBill(usc, fetchImpl = fetch, debug = false) {
+  let gw = null;
+  let gwErr = null;
+  try {
+    gw = await fetchEasebuzzBill(usc, fetchImpl);
+  } catch (err) {
+    if (err.status === 404) throw err; // the portal says the number is not valid
+    gwErr = err;
+  }
+
+  let html = null;
+  let htmlErr = null;
+  try {
+    html = await fetchTgnpdclHtml(usc, fetchImpl, debug);
+  } catch (err) {
+    htmlErr = err;
+  }
+
+  if (!gw && !html) {
+    const err = new Error(gwErr?.message || htmlErr?.message || 'TGNPDCL lookup failed. No bill data was shown.');
+    err.status = gwErr?.status || htmlErr?.status || 502;
+    if (htmlErr?.debug) err.debug = htmlErr.debug;
+    throw err;
+  }
+
+  const billDate = html?.billDate || gw?.billDate || '';
+  const month = html?.months?.[0]?.month || billMonthLabel(billDate);
+  const totalDue = html?.totalDue || gw?.totalAmount || 0;
+  const units = html?.billedUnits ?? null;
+
+  return {
+    ...(html || {}),
+    consumerName: html?.consumerName || gw?.consumerName || '',
+    address: html?.address || [gw?.area, gw?.eroName].filter(Boolean).join(', '),
+    billDate,
+    dueDate: html?.dueDate || gw?.dueDate || '',
+    billAmount: totalDue,
+    totalDue,
+    category: html?.category || gw?.category || '',
+    gatewayBillId: gw?.billId ?? null,
+    gatewayPaymentDone: gw?.paymentDone ?? null,
+    unitsSource: units !== null ? 'bill' : 'unavailable',
+    months: month ? [{ month, units: units, bill: totalDue, onPortal: true, present: true }] : [],
+    htmlError: htmlErr ? htmlErr.message : null,
+    gatewayError: gwErr ? gwErr.message : null,
+  };
 }

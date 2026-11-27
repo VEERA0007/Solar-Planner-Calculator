@@ -2,19 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/appliance_data.dart';
+import '../core/backend_service.dart';
 import '../core/calc.dart';
 import '../core/estimator_data.dart';
 import '../core/service_data.dart';
 import '../core/store.dart';
 import '../core/tariff.dart';
-import '../core/usc.dart';
 import 'pdf_quote.dart';
-import 'usc_section.dart';
 import 'roof_map.dart';
 import 'theme.dart';
 
-/// Solar Estimator: New Install flow (inputs, system, cost, ROI, customer page),
-/// Existing Plant (next build) and Generation.
+/// Solar Estimator: New Install (with 4-state USC bill fetch, inline tariff/DISCOM
+/// selector, custom rate override, roof map, BOM, ROI & Customer page),
+/// Existing Plant Audit, and standalone Power Generation & Yield Calculator.
 class EstimatorPage extends StatefulWidget {
   final AppState state;
   const EstimatorPage({super.key, required this.state});
@@ -30,15 +30,26 @@ class _EstimatorPageState extends State<EstimatorPage> {
   bool dcr = true;
   SysType sys = SysType.onGrid;
   int panelIdx = 1;
-  bool billHelp = false;
   bool custOpen = false;
+  bool uscOpen = false;
+  bool bomOpen = false;
+  int bomTab = 0;
   double escalation = 3, omPct = 1;
   bool yearly = false;
   Map<SysType, SysOption> opts = {};
   bool slabOpen = false;
 
+  // Live USC & Tariff sync state
+  bool fetchingUsc = false;
+  bool syncingTariff = false;
+  String uscMsg = '';
+  bool uscErr = false;
+  List<UscMonthEntry> uscMonths = [];
+
   final units = TextEditingController(text: '400');
   final bill = TextEditingController();
+  final uscCtrl = TextEditingController();
+  final tariffOverride = TextEditingController();
   final roof = TextEditingController();
   final backup = TextEditingController();
   final inverterBrand = TextEditingController();
@@ -46,15 +57,20 @@ class _EstimatorPageState extends State<EstimatorPage> {
   final phone = TextEditingController();
   final address = TextEditingController();
   final search = TextEditingController();
-  final exWp = TextEditingController(text: '550'), exQty = TextEditingController(), exInv = TextEditingController(), exGen = TextEditingController();
+  final exWp = TextEditingController(text: '550'),
+      exQty = TextEditingController(),
+      exInv = TextEditingController(),
+      exGen = TextEditingController();
   final customCost = TextEditingController();
+  // Standalone Generation tab controllers
+  final genKw = TextEditingController(text: '3.0');
+  final genUse = TextEditingController(text: '400');
+  final genTariff = TextEditingController();
+
   String exArch = 'String inverter (Central MPPT)';
   double? invOverride; // chosen inverter size in kW, null = the suggested size
   String payMsg = '';
   RoofResult? roofTrace;
-  /// The USC record whose 12-month average is currently set as units (null when none).
-  UscRecord? _applied;
-  final UscLink _usc = UscLink();
 
   AppState get s => widget.state;
 
@@ -65,10 +81,8 @@ class _EstimatorPageState extends State<EstimatorPage> {
     name.text = p.name;
     phone.text = p.mobile;
     address.text = p.address;
+    uscCtrl.text = p.serviceNo;
     _takePush();
-    UscStore.load().then((v) {
-      if (mounted) _usc.saved.value = v;
-    });
   }
 
   @override
@@ -79,8 +93,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   @override
   void dispose() {
-    _usc.dispose();
-    for (final c in [units, bill, roof, backup, inverterBrand, name, phone, address, search, exWp, exQty, exInv, exGen, customCost]) {
+    for (final c in [
+      units, bill, uscCtrl, tariffOverride, roof, backup, inverterBrand,
+      name, phone, address, search, exWp, exQty, exInv, exGen, customCost,
+      genKw, genUse, genTariff,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -99,84 +116,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   String _t(num v) => v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
-
-  /// Takes the 12-month average from the USC block and sets this month's units.
-  void _applyUsc(UscRecord r) {
-    setState(() {
-      mode = 'units';
-      _applied = r;
-      units.text = '${r.avgUnits.round()}';
-    });
-    toast(context, '${r.avgUnits.round()} kWh/month set from ${r.discom.code} 12-month average');
-  }
-
-  /// Opens the USC Number tab and shows a record in it (from the Units card or History).
-  void _openUsc(UscLoad req) {
-    setState(() => mode = 'usc');
-    _usc.load.value = req;
-  }
-
-  /// Monthly Consumption switch: Units (kWh), Bill (₹), USC Number.
-  Widget _segments() {
-    Widget seg(String label, bool on, VoidCallback tap) => Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: tap,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(color: on ? C.card : Colors.transparent, borderRadius: BorderRadius.circular(12), border: on ? Border.all(color: C.line) : null),
-              child: FittedBox(fit: BoxFit.scaleDown, child: Text(label, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: on ? C.orange : C.mute))),
-            ),
-          ),
-        );
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14)),
-      child: Row(children: [
-        seg('Units (kWh)', mode == 'units', () => setState(() => mode = 'units')),
-        seg('Bill (₹)', mode == 'bill', () => setState(() => mode = 'bill')),
-        seg('USC Number', mode == 'usc', () => setState(() => mode = 'usc')),
-      ]),
-    );
-  }
-
-  /// Units card after a USC average is synced: govt units, official USC line, Clear link.
-  Widget _appliedUnits(UscRecord r) {
-    final u = _monthlyUnits;
-    final tint = C.green.withValues(alpha: .06);
-    final edge = C.green.withValues(alpha: .4);
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(16), border: Border.all(color: edge)),
-        child: Row(children: [
-          Expanded(child: Text(u.round().toString(), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 26))),
-          Text('kWh (Govt DISCOM)', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 14)),
-        ]),
-      ),
-      const SizedBox(height: 10),
-      Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: tint, borderRadius: BorderRadius.circular(16), border: Border.all(color: edge)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Official ${r.discom.code} USC #${r.usc}', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 14)),
-          Row(children: [
-            TextButton(
-              onPressed: () => _openUsc(UscLoad(r)),
-              child: Text('View DISCOM Bills', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
-            ),
-            TextButton(
-              onPressed: () => setState(() => _applied = null),
-              child: Text('Clear USC', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800)),
-            ),
-          ]),
-        ]),
-      ),
-    ]);
-  }
 
   void _fill(EstimateInput d) {
     mode = 'units';
@@ -200,10 +139,18 @@ class _EstimatorPageState extends State<EstimatorPage> {
   double get _monthlyUnits {
     switch (mode) {
       case 'bill':
+        final ov = _num(tariffOverride);
+        if (ov > 0) return _num(bill) / ov;
         return s.tariffCat.unitsForBill(_num(bill));
       default:
         return _num(units);
     }
+  }
+
+  double _activeRate(double u) {
+    final ov = _num(tariffOverride);
+    if (ov > 0) return ov;
+    return u > 0 ? s.tariffCat.marginal(u) : s.unitPrice;
   }
 
   PanelModel get _panel {
@@ -222,7 +169,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   Map<SysType, SysOption> _options(double u) {
     final daily = u / 30;
-    final marginal = s.tariffCat.marginal(u);
+    final rate = _activeRate(u);
     return {
       for (final t in SysType.values)
         t: buildOption(
@@ -230,7 +177,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
           dailyKwh: daily,
           connectedKw: daily / 5,
           yieldPerKwp: s.locationYield,
-          tariff: marginal,
+          tariff: rate,
           dcr: dcr,
           profile: _profile,
           backupHours: _num(backup),
@@ -240,7 +187,12 @@ class _EstimatorPageState extends State<EstimatorPage> {
     };
   }
 
-  Customer _readCustomer() => Customer(name: name.text.trim(), phone: phone.text.trim(), address: address.text.trim());
+  Customer _readCustomer() => Customer(
+        usc: normalizeUsc(uscCtrl.text),
+        name: name.text.trim(),
+        phone: phone.text.trim(),
+        address: address.text.trim(),
+      );
 
   /// Builds the three options and the savings result. [go] opens the results page.
   void _calc({bool go = true}) {
@@ -250,15 +202,16 @@ class _EstimatorPageState extends State<EstimatorPage> {
       return;
     }
     final plan = s.tariffCat;
+    final ov = _num(tariffOverride);
     opts = _options(u);
     final o = opts[sys]!;
     final y = s.locationYield;
     final off = (o.kwp * y * 30) < u ? o.kwp * y * 30 : u;
-    final eff = off > 0 ? (plan.bill(u) - plan.bill(u - off)) / off : plan.marginal(u);
+    final eff = ov > 0 ? ov : (off > 0 ? (plan.bill(u) - plan.bill(u - off)) / off : plan.marginal(u));
     final inp = EstimateInput(
       mode: 'units',
       monthlyUnits: u,
-      monthlyBill: plan.bill(u),
+      monthlyBill: ov > 0 ? u * ov : plan.bill(u),
       tariff: double.parse(eff.toStringAsFixed(2)),
       coverage: 100,
       yieldPerKwDay: double.parse(y.toStringAsFixed(2)),
@@ -277,6 +230,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
     s.customer = _readCustomer();
     s.result = calculate(inp);
     s.publishEstimate(s.result!.kw, inp.tariff);
+    // Sync Generation tab inputs with latest estimate
+    genKw.text = s.result!.kw.toStringAsFixed(2);
+    genUse.text = u.round().toString();
+    genTariff.text = inp.tariff.toStringAsFixed(2);
     if (go) {
       setState(() => stage = 1);
     } else {
@@ -286,6 +243,84 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   void _recalc() {
     if (s.result != null) _calc(go: false);
+  }
+
+  Future<void> _fetchUsc() async {
+    final clean = normalizeUsc(uscCtrl.text);
+    if (clean.length < 6) {
+      setState(() {
+        uscErr = true;
+        uscMsg = 'Enter a valid USC / Consumer Service Number (minimum 6 characters).';
+      });
+      return;
+    }
+    setState(() {
+      fetchingUsc = true;
+      uscErr = false;
+      uscMsg = 'Fetching 12-month bill history from ${s.discom.name}...';
+    });
+
+    final res = await BackendService.fetchUscBill(
+      rawBaseUrl: s.prefs.backendUrl,
+      usc: clean,
+      stateId: s.prefs.stateId,
+      discomId: s.prefs.discomId,
+      category: s.prefs.category,
+    );
+
+    if (!mounted) return;
+    if (res.ok) {
+      setState(() {
+        fetchingUsc = false;
+        uscErr = false;
+        uscMonths = res.history;
+        if (res.avgMonthlyUnits > 0) {
+          mode = 'units';
+          units.text = res.avgMonthlyUnits.round().toString();
+        } else if (res.avgMonthlyBill > 0) {
+          mode = 'bill';
+          bill.text = res.avgMonthlyBill.round().toString();
+        }
+        if (res.consumerName.isNotEmpty) name.text = res.consumerName;
+        if (res.address.isNotEmpty) address.text = res.address;
+        uscMsg = 'Fetched ${res.history.isNotEmpty ? '${res.history.length} months' : 'bill'} · '
+            'Avg ${res.avgMonthlyUnits.round()} kWh/mo'
+            '${res.consumerName.isNotEmpty ? ' · ${res.consumerName}' : ''}';
+      });
+      s.addUscHistory(UscHistoryItem(
+        usc: clean,
+        stateId: s.prefs.stateId,
+        discomName: s.discom.name,
+        consumerName: res.consumerName,
+        avgMonthlyUnits: res.avgMonthlyUnits,
+        savedAt: DateTime.now().millisecondsSinceEpoch,
+      ));
+    } else {
+      setState(() {
+        fetchingUsc = false;
+        uscErr = true;
+        uscMsg = res.error ?? 'Could not fetch bill.';
+      });
+    }
+  }
+
+  Future<void> _syncLiveTariff() async {
+    setState(() => syncingTariff = true);
+    final res = await BackendService.fetchRealtimeTariff(
+      rawBaseUrl: s.prefs.backendUrl,
+      stateId: s.prefs.stateId,
+      discomId: s.prefs.discomId,
+      category: s.prefs.category,
+      monthlyUnits: _monthlyUnits > 0 ? _monthlyUnits : 400,
+    );
+    if (!mounted) return;
+    setState(() => syncingTariff = false);
+    if (res.ok && res.rate != null) {
+      setState(() => tariffOverride.text = res.rate!.toStringAsFixed(2));
+      toast(context, 'Live tariff synced: ₹${res.rate!.toStringAsFixed(2)}/kWh');
+    } else {
+      toast(context, 'Using official ${s.st.name('en')} slab table (${s.st.order})');
+    }
   }
 
   void _save() {
@@ -316,66 +351,21 @@ class _EstimatorPageState extends State<EstimatorPage> {
     toast(context, idx >= 0 ? 'Estimate updated' : 'Estimate saved');
   }
 
-  /// Required parts for the chosen system: (title, spec, quantity, category, note).
-  List<(String, String, String, String, String)> _bomParts(SysOption o, EstimateResult r) {
-    final models = panelsFor(dcr);
-    return <(String, String, String, String, String)>[
-      ('${models[panelIdx].wp}W ${dcr ? 'DCR' : 'Non-DCR'} Solar Modules', models[panelIdx].name, '${o.panels} Nos (${o.kwp.toStringAsFixed(2)} kWp)', 'PV MODULES',
-          dcr ? 'Filtered DCR domestic modules required for PM Surya Ghar Govt DBT subsidy.' : 'Open-market modules. No government subsidy.'),
-      (o.invLabel, o.threePhase ? '3-phase 415V' : '1-phase 230V', '1 Unit', 'INVERTER / PCU', 'Sized for ${_t(invKw(o))} kW AC.'),
-      if (sys.hasBattery && o.batteryKwh > 0)
-        ('LiFePO4 Battery Bank', 'Battery storage for backup', '${o.batteryKwh.toStringAsFixed(1)} kWh', 'BATTERY BANK', 'Needed for backup and night power.'),
-      ('Mounting Structure', 'Ground or elevated structure', '1 Set (${o.panels}-panel bay)', 'BOS & STRUCTURE', 'Sized for about ${r.roofSqm.round()} sq m of roof.'),
-      ('DC & AC Cabling + MC4', 'UV DC cable and armoured AC cable', '1 Set', 'BOS & STRUCTURE', 'Keeps voltage drop low between array, inverter and board.'),
-      ('DCDB + Protection Kit', 'DC SPD, DC fuse, AC MCB/MCCB and AC SPD', '1 Combined Kit', 'BOS & PROTECTION', 'Protects the feeders against surges and faults.'),
-      ('Earthing + Lightning Arrester', 'Earth pits, GI strip and LA', '3 Sets', 'BOS & PROTECTION', 'Dedicated DC, AC and LA grounding.'),
-      if (sys != SysType.offGrid)
-        ('Bi-Directional Net Meter', '3-phase DISCOM-approved smart meter set', '1 Meter Pair', 'METERING & COMPLIANCE', 'Needed for DISCOM net-metering credits.'),
-      if (dcr)
-        ('DCR / ALMM Compliance Dossier', 'ALMM certificate and domestic cell invoice', '1 Complete Pack', 'METERING & COMPLIANCE', 'Proof that the cells and modules are domestically made.'),
-    ];
-  }
-
-  QuoteInfo _quoteInfo(EstimateResult r) {
-    final o = opts[sys] ?? _options(r.monthlyUnits)[sys]!;
-    final models = panelsFor(dcr);
-    final parts = _bomParts(o, r);
-    final invKwVal = invKw(o);
-    return QuoteInfo(
-      architecture: sys == SysType.onGrid ? 'On-Grid' : sys == SysType.hybrid ? 'Hybrid' : 'Off-Grid',
-      standard: dcr ? 'DCR ALMM (Subsidy Eligible)' : 'Non-DCR (No subsidy)',
-      category: category.toUpperCase(),
-      inverter: '${_t(invKwVal)} kW ${inverterBrand.text.trim().isEmpty ? o.invLabel : inverterBrand.text.trim()}',
-      phase: o.threePhase ? '3-Phase 415V' : '1-Phase 230V',
-      panel: '${models[panelIdx].wp}W ${dcr ? 'DCR' : 'Non-DCR'} ${models[panelIdx].name}',
-      panelCount: o.panels,
-      panelKwp: o.kwp,
-      batteryKwh: o.batteryKwh,
-      psh: s.locationYield,
-      escalation: escalation,
-      omPct: omPct,
-      tariff: s.unitPrice,
-      site: address.text.trim(),
-      sizingNote: invKwVal > 0
-          ? 'Optimal DC/AC ratio (${(o.kwp / invKwVal).toStringAsFixed(2)}x). Recommended inverter: ${_t(invKwVal)} kW for ${o.kwp.toStringAsFixed(2)} kWp of panels.'
-          : '',
-      bom: [for (final p in parts) [p.$4, '${p.$1}: ${p.$2}. ${p.$5}', p.$3, 'Required']],
-    );
-  }
-
   Future<void> _quote(Customer c, EstimateResult r) async {
     try {
-      await shareQuote(c, r, s.brand, info: _quoteInfo(r));
+      await shareQuote(c, r, s.brand);
     } catch (e) {
       if (mounted) toast(context, 'Could not create PDF: $e');
     }
   }
 
   Future<void> _open(String url) async {
+    if (url.isEmpty) return;
     await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
   void _load(SavedRecord r) {
+    uscCtrl.text = r.customer.usc;
     name.text = r.customer.name;
     phone.text = r.customer.phone;
     address.text = r.customer.address;
@@ -578,86 +568,195 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final plan = s.tariffCat;
     final u = _monthlyUnits;
     final quick = u > 0 ? _options(u)[SysType.onGrid] : null;
-    final applied = _applied;
-    final sourceCode = applied?.discom.code ?? s.discom.name.split(' ').first;
+    final book = s.book;
+    final activeRate = _activeRate(u);
+
     return [
+      // Collapsible 4-State Live USC / DISCOM Bill Fetch Panel
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter Units, Bill amount, or fetch DISCOM USC history'),
+          InkWell(
+            onTap: () => setState(() => uscOpen = !uscOpen),
+            child: Row(children: [
+              Container(width: 38, height: 38, decoration: BoxDecoration(color: C.chipBlue, shape: BoxShape.circle), child: Icon(Icons.electric_meter_outlined, color: C.sky, size: 20)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('USC / DISCOM Live Bill Fetch', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  Text('${s.st.name('en')} · ${s.discom.name} (Auto-fill 12-mo units)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 12)),
+                ]),
+              ),
+              Icon(uscOpen ? Icons.expand_less : Icons.expand_more, color: C.mute),
+            ]),
+          ),
+          if (uscOpen) ...[
+            const SizedBox(height: 12),
+            if (book != null) ...[
+              Row(children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('est_st_${s.prefs.stateId}'),
+                    initialValue: s.prefs.stateId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'State', isDense: true),
+                    items: [for (final x in book.states) DropdownMenuItem(value: x.id, child: Text(x.name('en'), overflow: TextOverflow.ellipsis))],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      s.chooseState(v);
+                      s.savePrefs();
+                      setState(() {});
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('est_dc_${s.prefs.stateId}_${s.prefs.discomId}'),
+                    initialValue: s.discom.id,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'DISCOM', isDense: true),
+                    items: [for (final d in s.st.discoms) DropdownMenuItem(value: d.id, child: Text(d.name, overflow: TextOverflow.ellipsis))],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      s.prefs.discomId = v;
+                      s.savePrefs();
+                      setState(() {});
+                    },
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 10),
+            ],
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: uscCtrl,
+                  decoration: const InputDecoration(labelText: 'USC / Service Number', hintText: 'e.g. 102938475', isDense: true),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: fetchingUsc ? null : _fetchUsc,
+                style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.blue),
+                child: Text(fetchingUsc ? '...' : 'Fetch', style: const TextStyle(fontWeight: FontWeight.w800)),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              OutlinedButton.icon(
+                onPressed: () => _open(s.discom.url),
+                icon: const Icon(Icons.open_in_new, size: 15),
+                label: Text('Open ${s.discom.name} Portal', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+              ),
+              for (final h in s.uscHistory.take(3))
+                ActionChip(
+                  label: Text('${h.usc} (${h.avgMonthlyUnits.round()} U)', style: const TextStyle(fontSize: 12)),
+                  onPressed: () => setState(() {
+                    uscCtrl.text = h.usc;
+                    if (h.avgMonthlyUnits > 0) {
+                      mode = 'units';
+                      units.text = h.avgMonthlyUnits.round().toString();
+                    }
+                    if (h.consumerName.isNotEmpty) name.text = h.consumerName;
+                  }),
+                ),
+            ]),
+            if (uscMsg.isNotEmpty) _note(uscErr ? Icons.info_outline : Icons.check_circle_outline, uscErr ? C.amber : C.green, uscMsg),
+            if (uscMonths.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 54,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final m in uscMonths.take(12))
+                      Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.line)),
+                        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Text(m.month, style: TextStyle(color: C.mute, fontSize: 10.5, fontWeight: FontWeight.w700)),
+                          Text('${m.units.round()} U', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                        ]),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ]),
+      ),
+      _gap(),
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter your monthly units or a bill amount'),
           _gap(),
           Text('Monthly Consumption', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 13)),
           const SizedBox(height: 8),
-          _segments(),
+          Row(children: [
+            _chip('Units (kWh)', mode == 'units', () => setState(() => mode = 'units')),
+            _chip('Bill (₹)', mode == 'bill', () => setState(() => mode = 'bill')),
+          ]),
           const SizedBox(height: 12),
-          if (mode == 'usc')
-            UscSection(link: _usc, onApply: _applyUsc)
-          else ...[
-            if (mode == 'units' && applied != null)
-              _appliedUnits(applied)
-            else if (mode == 'units')
-              _field(units, 'Units / Month (kWh)')
-            else
-              _field(bill, 'Bill / Month (energy charges)', prefix: '₹ '),
-            if (u > 0) ...[
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('${s.st.name('en').split(' ').first.toUpperCase()} Slab: ${plan.slabLabel(u)}', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w800)),
+          if (mode == 'units') _field(units, 'Units / Month (kWh)'),
+          if (mode == 'bill') _field(bill, 'Bill / Month (energy charges)', prefix: '₹ '),
+          if (u > 0) ...[
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${s.st.name('en').split(' ').first.toUpperCase()} · ${plan.slabLabel(u)}', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text('${u.round()} kWh → ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo (₹${(_num(tariffOverride) > 0 ? _num(tariffOverride) : plan.average(u)).toStringAsFixed(2)}/kWh avg)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                if (quick != null) ...[
                   const SizedBox(height: 4),
-                  Text('${u.round()} kWh · ₹${groupIndian(plan.bill(u))}/mo (₹${plan.average(u).toStringAsFixed(2)}/kWh avg)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                  if (quick != null) ...[
-                    const SizedBox(height: 4),
-                    Text('Suggested: ${quick.kwp.toStringAsFixed(2)} kWp (${quick.panels} × ${_panel.wp}W)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 14)),
-                  ],
-                  const SizedBox(height: 6),
-                  InkWell(
-                    onTap: () => setState(() => slabOpen = !slabOpen),
-                    child: Row(children: [
-                      Text(slabOpen ? 'Hide bill working' : 'How was this bill worked out?', style: TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 12.5)),
-                      Icon(slabOpen ? Icons.expand_less : Icons.expand_more, color: C.blue, size: 18),
-                    ]),
-                  ),
-                  if (slabOpen) ..._slabLines(plan, u),
-                ]),
-              ),
-            ],
-            if (applied == null) ...[
-              const SizedBox(height: 12),
-              Row(children: [
-                for (final q in const [250, 400, 600])
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() {
-                        mode = 'units';
-                        units.text = '$q';
-                      }),
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        padding: const EdgeInsets.symmetric(vertical: 9),
-                        decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-                        child: FittedBox(fit: BoxFit.scaleDown, child: Text('$q U (₹${groupIndian(plan.bill(q.toDouble()))})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
-                      ),
-                    ),
-                  ),
-              ]),
-              if (mode == 'units') ...[
-                const SizedBox(height: 10),
+                  Text('Suggested: ${quick.kwp.toStringAsFixed(2)} kWp (${quick.panels} × ${_panel.wp}W)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 14)),
+                ],
+                const SizedBox(height: 6),
                 InkWell(
-                  onTap: () => setState(() => mode = 'bill'),
-                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => setState(() => slabOpen = !slabOpen),
+                  child: Row(children: [
+                    Text(slabOpen ? 'Hide bill working' : 'How was this bill worked out?', style: TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                    Icon(slabOpen ? Icons.expand_less : Icons.expand_more, color: C.blue, size: 18),
+                  ]),
+                ),
+                if (slabOpen) ..._slabLines(plan, u),
+              ]),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Row(children: [
+            for (final q in const [250, 400, 600])
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    mode = 'units';
+                    units.text = '$q';
+                  }),
                   child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: C.amber.withValues(alpha: .1), borderRadius: BorderRadius.circular(14), border: Border.all(color: C.amber.withValues(alpha: .35))),
-                    child: Row(children: [
-                      const Expanded(child: Text("Don't know your exact units? Calculate from bill", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
-                      Icon(Icons.expand_more, color: C.mute),
-                    ]),
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
+                    child: FittedBox(fit: BoxFit.scaleDown, child: Text('$q U (₹${groupIndian(plan.bill(q.toDouble()))})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
                   ),
                 ),
-              ],
-            ],
+              ),
+          ]),
+          if (mode == 'units') ...[
+            const SizedBox(height: 10),
+            InkWell(
+              onTap: () => setState(() => mode = 'bill'),
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: C.amber.withValues(alpha: .1), borderRadius: BorderRadius.circular(14), border: Border.all(color: C.amber.withValues(alpha: .35))),
+                child: Row(children: [
+                  const Expanded(child: Text("Don't know your exact units? Calculate from bill", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
+                  Icon(Icons.expand_more, color: C.mute),
+                ]),
+              ),
+            ),
           ],
         ]),
       ),
@@ -666,48 +765,39 @@ class _EstimatorPageState extends State<EstimatorPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Expanded(child: Text('Electricity Cost Per Unit (₹/kWh)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-            if (applied != null)
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.refresh, size: 15, color: C.blue),
-                const SizedBox(width: 3),
-                Text('${applied.discom.code} Live (₹${(u > 0 ? plan.marginal(u) : s.unitPrice).toStringAsFixed(2)})', style: TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 12.5)),
-              ])
-            else
-              Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text(s.discom.name, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
+            Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text(s.discom.name, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
           ]),
           const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            decoration: BoxDecoration(
-              color: applied != null ? C.green.withValues(alpha: .06) : C.card2,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: applied != null ? C.green.withValues(alpha: .4) : C.line),
+          Row(children: [
+            Expanded(
+              child: _field(
+                tariffOverride,
+                'Custom ₹/kWh (blank = auto ${activeRate.toStringAsFixed(2)})',
+                hint: activeRate.toStringAsFixed(2),
+                prefix: '₹ ',
+              ),
             ),
-            child: Row(children: [
-              Text(applied != null ? applied.blendedRate.toStringAsFixed(2) : (u > 0 ? plan.marginal(u) : s.unitPrice).toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-              const Spacer(),
-              if (applied != null) Text('Govt DISCOM Rate', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 13)),
-            ]),
-          ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: syncingTariff ? null : _syncLiveTariff,
+              icon: const Icon(Icons.sync, size: 17),
+              label: Text(syncingTariff ? '...' : 'Sync', style: const TextStyle(fontWeight: FontWeight.w800)),
+              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), foregroundColor: C.green, side: BorderSide(color: C.green.withValues(alpha: .6))),
+            ),
+          ]),
           const SizedBox(height: 6),
-          Text('${s.st.order}. Effective ${s.st.effective}. Energy charges only. Change state or category in Settings.', style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
+          Text('${s.st.order}. Effective ${s.st.effective}. Auto slab: ₹${(u > 0 ? plan.marginal(u) : s.unitPrice).toStringAsFixed(2)}/kWh.', style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
           _gap(),
           Text('Roof Area in Square Meters (Optional)', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 13)),
           const SizedBox(height: 8),
           Row(children: [
-            Expanded(child: _field(roof, 'Roof area')),
+            Expanded(child: _field(roof, 'Roof area', suffix: 'sq m')),
             const SizedBox(width: 10),
             OutlinedButton.icon(
               onPressed: _openRoofMap,
               icon: const Icon(Icons.location_on_outlined, size: 18),
               label: const Text('Map', style: TextStyle(fontWeight: FontWeight.w800)),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(0, 52),
-                foregroundColor: C.orange,
-                backgroundColor: C.amber.withValues(alpha: .08),
-                side: BorderSide(color: C.amber, width: 1.6),
-              ),
+              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), foregroundColor: C.orange, side: BorderSide(color: C.orange.withValues(alpha: .6))),
             ),
           ]),
           if (roofTrace != null) _note(Icons.roofing, C.green, 'Traced roof: ${roofTrace!.areaM2.toStringAsFixed(1)} m². It fits ${roofTrace!.panels} panels (${roofTrace!.kwp.toStringAsFixed(2)} kWp).'),
@@ -728,7 +818,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
               Icon(Icons.battery_charging_full, color: C.orange, size: 19),
               const SizedBox(width: 6),
               const Expanded(child: Text('Battery Backup (Hours)', style: TextStyle(fontWeight: FontWeight.w800))),
-              Text('Based on Inverter', style: TextStyle(color: C.mute, fontSize: 12)),
+              Text('Based on inverter', style: TextStyle(color: C.mute, fontSize: 12)),
             ]),
             const SizedBox(height: 8),
             _field(backup, 'Backup hours', hint: 'Enter backup hours based on inverter'),
@@ -738,35 +828,44 @@ class _EstimatorPageState extends State<EstimatorPage> {
       _gap(),
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (u > 0) ...[
+          if (u > 0)
             Row(children: [
               Icon(Icons.check_circle_outline, color: C.green, size: 19),
               const SizedBox(width: 6),
-              Expanded(child: Text('Analyzed $sourceCode Usage: ${u.round()} kWh · ₹${groupIndian(plan.bill(u))}/mo', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
-            ]),
-            const SizedBox(height: 6),
-            Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
-          ] else
+              Expanded(child: Text('Analyzed Usage: ${u.round()} kWh · ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
+              Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
+            ])
+          else
             Text('Enter units or a bill above.', style: TextStyle(color: C.mute)),
           _gap(),
           Row(children: [
             CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('1', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
             const SizedBox(width: 8),
-            const Expanded(child: Text('Installation Category', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-            if (u > 0) Text('Based on ${u.round()} kWh · ₹${groupIndian(plan.bill(u))}/mo', style: TextStyle(color: C.mute, fontSize: 11.5)),
+            const Text('Installation Category', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
           ]),
           const SizedBox(height: 10),
           Row(children: [
-            _chip('Residential', category == 'residential', () => setState(() => category = 'residential'), sub: 'Govt Subsidy'),
-            _chip('Commercial', category == 'commercial', () => setState(() => category = 'commercial'), sub: 'ALMM Spec'),
-            _chip('Agricultural', category == 'agricultural', () => setState(() => category = 'agricultural'), sub: 'PM-KUSUM'),
+            _chip('Residential', category == 'residential', () {
+              setState(() => category = 'residential');
+              s.prefs.category = 'domestic';
+              s.savePrefs();
+            }, sub: 'Open Capex'),
+            _chip('Commercial', category == 'commercial', () {
+              setState(() => category = 'commercial');
+              s.prefs.category = 'commercial';
+              s.savePrefs();
+            }, sub: 'Lower Cost'),
+            _chip('Industrial', category == 'industrial', () {
+              setState(() => category = 'industrial');
+              s.prefs.category = 'industrial';
+              s.savePrefs();
+            }, sub: 'Plant'),
+            _chip('Agricultural', category == 'agricultural', () => setState(() => category = 'agricultural'), sub: 'Pumps'),
           ]),
           _gap(),
           Row(children: [
-            CircleAvatar(radius: 11, backgroundColor: C.text, child: const Text('2', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
+            CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('2', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
             const SizedBox(width: 8),
-            Icon(Icons.shield_outlined, color: C.orange, size: 18),
-            const SizedBox(width: 6),
             const Expanded(child: Text('Select The Module', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
             Text('DCR', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 13)),
             Switch(
@@ -781,12 +880,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
             ),
             Text('Non-DCR', style: TextStyle(color: C.text, fontWeight: FontWeight.w800, fontSize: 13)),
           ]),
+          Text(subsidyNote(_profile, dcr, sys), style: TextStyle(color: C.mute, fontSize: 12, height: 1.35)),
         ]),
       ),
       _gap(),
       _bigButton('Calculate the Solar System', _calc, icon: Icons.arrow_forward),
-      _gap(),
-      UscHistory(link: _usc, onOpen: _openUsc),
       _gap(),
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -850,8 +948,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   // ---------- 2. results ----------
-  String bomTab = 'All';
-
   List<Widget> _results() {
     final r = s.result!;
     final o = opts[sys] ?? _options(r.monthlyUnits)[sys]!;
@@ -861,6 +957,8 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final battery = o.batteryKwh * rates.battery;
     final pv = o.gross - extra.roundToDouble() - battery.roundToDouble();
     final models = panelsFor(dcr);
+    final bom = buildBom(o, dcr: dcr, profile: _profile, rates: s.rates);
+    final bomFiltered = bom.items.where((x) => x.tab == bomTab).toList();
     final roofSqm = _num(roof);
     final warns = <String>[];
     if (roofSqm > 0 && r.roofSqm > roofSqm) warns.add('This system needs about ${r.roofSqm.round()} sq m of roof but you entered ${roofSqm.round()} sq m. Reduce the system or check the roof.');
@@ -872,78 +970,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
     if (r.paybackYears == null || r.paybackYears! > 12) {
       warns.add(r.paybackYears == null ? 'This system does not pay back within ${r.years} years at this usage. Check the units entered or try On-Grid.' : 'Payback is ${r.paybackYears!.toStringAsFixed(1)} years. Low usage or battery cost stretches it. On-Grid is usually quickest.');
     }
-    final sysName = sys == SysType.onGrid ? 'On-Grid' : sys == SysType.hybrid ? 'Hybrid' : 'Off-Grid';
-    final catLabel = switch (category) {
-      'commercial' => 'Commercial',
-      'agricultural' => 'Agricultural',
-      _ => 'Residential',
-    };
-    final pb = r.paybackYears;
-    final good = pb != null;
-    final pbText = good ? '${fmt1(pb!)} Yrs' : '${r.years}+ Yrs';
-
-    // Required parts for this system, grouped by the filter tabs.
-    final parts = _bomParts(o, r);
-    bool inTab(String c) => switch (bomTab) {
-          'PV, Inv & Battery' => c == 'PV MODULES' || c == 'INVERTER / PCU' || c == 'BATTERY BANK',
-          'BOS & Structure' => c.startsWith('BOS'),
-          'Metering' => c.startsWith('METERING'),
-          _ => true,
-        };
-    final shown = [for (final p in parts) if (inTab(p.$4)) p];
-    Widget tab(String t, int n) {
-      final isOn = bomTab == t;
-      return Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: GestureDetector(
-          onTap: () => setState(() => bomTab = t),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            decoration: BoxDecoration(color: isOn ? C.text : C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: isOn ? C.text : C.line)),
-            child: Text(t == 'All' ? 'All Parts ($n)' : t, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: isOn ? C.bg : C.text)),
-          ),
-        ),
-      );
-    }
-
-    Widget sysCard(String title, String sub, SysType t, Color c) {
-      final isOn = sys == t;
-      return Expanded(
-        child: GestureDetector(
-          onTap: () {
-            setState(() => sys = t);
-            _recalc();
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 3),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: C.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: isOn ? c : C.line, width: isOn ? 1.6 : 1)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: TextStyle(color: c, fontWeight: FontWeight.w800, fontSize: 13)),
-              const SizedBox(height: 4),
-              Text(sub, style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
-            ]),
-          ),
-        ),
-      );
-    }
-
-    Widget tile(String head, IconData ic, Color c, String value, Color vc, String sub) => Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.line)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Icon(ic, size: 15, color: c),
-                const SizedBox(width: 4),
-                Expanded(child: Text(head, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 10.5))),
-              ]),
-              const SizedBox(height: 6),
-              Text(value, style: TextStyle(color: vc, fontWeight: FontWeight.w800, fontSize: 15)),
-              Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 11.5)),
-            ]),
-          ),
-        );
 
     return [
       Panel(
@@ -964,111 +990,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
-      // 3-way interlink
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: C.chipBlue, shape: BoxShape.circle), child: Icon(Icons.link, color: C.blue, size: 20)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('3-WAY LIVE SYSTEM INTERLINK', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
-                Text('Application load · DCR/Non-DCR · Architecture & BOM', style: TextStyle(color: C.mute, fontSize: 12)),
-              ]),
-            ),
-            OutlinedButton(
-              onPressed: () => toast(context, 'Edit loads comes in the next step'),
-              child: const Text('Edit Loads', style: TextStyle(fontWeight: FontWeight.w800)),
-            ),
-          ]),
-          const SizedBox(height: 12),
-          IntrinsicHeight(
-            child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              tile('1. APPLICATION', Icons.memory, C.green, catLabel, C.text, '${r.monthlyUnits.round()} kWh · ${o.kwp.toStringAsFixed(1)} kWp'),
-              const SizedBox(width: 8),
-              tile('2. MODULE', Icons.shield_outlined, C.green, dcr ? 'DCR (ALMM)' : 'Non-DCR', dcr ? C.green : C.text, '${o.panels} × ${models[panelIdx].wp} Wp'),
-              const SizedBox(width: 8),
-              tile('3. SYSTEM', Icons.bolt, C.orange, sysName, C.orange, '${o.batteryKwh.toStringAsFixed(1)} kWh Battery'),
-            ]),
-          ),
-          const SizedBox(height: 12),
-          Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-            Text('App Type:', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800)),
-            for (final c in const [('residential', 'Residential'), ('commercial', 'Commercial'), ('agricultural', 'Agricultural')])
-              GestureDetector(
-                onTap: () {
-                  setState(() => category = c.$1);
-                  _recalc();
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(color: category == c.$1 ? C.green : C.card2, borderRadius: BorderRadius.circular(12)),
-                  child: Text(c.$2, style: TextStyle(fontWeight: FontWeight.w800, color: category == c.$1 ? Colors.white : C.text)),
-                ),
-              ),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(
-              flex: 4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Text('DCR', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
-                    Switch(
-                      value: !dcr,
-                      onChanged: (v) {
-                        setState(() {
-                          dcr = !v;
-                          panelIdx = 1;
-                        });
-                        _recalc();
-                      },
-                      activeColor: C.amber,
-                    ),
-                    Text('Non-DCR', style: TextStyle(color: C.text, fontWeight: FontWeight.w800)),
-                  ]),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              flex: 5,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14)),
-                child: Row(children: [
-                  for (final t in SysType.values)
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() => sys = t);
-                          _recalc();
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 9),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(color: sys == t ? C.orange : Colors.transparent, borderRadius: BorderRadius.circular(10)),
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(t == SysType.onGrid ? 'On-Grid' : t == SysType.hybrid ? 'Hybrid' : 'Off-Grid', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: sys == t ? Colors.white : C.text)),
-                          ),
-                        ),
-                      ),
-                    ),
-                ]),
-              ),
-            ),
-          ]),
-        ]),
-      ),
-      Panel(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.shield_outlined, color: C.green, size: 20),
+            Icon(Icons.verified_user_outlined, color: C.green, size: 20),
             const SizedBox(width: 8),
             const Expanded(child: Text('DCR Hardware Filter & Standard', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
             Text('DCR', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 12.5)),
@@ -1115,36 +1040,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
           ),
           const SizedBox(height: 8),
           Text('Typical sizes. Confirm the datasheet and ALMM listing before quoting.', style: TextStyle(color: C.mute, fontSize: 11.5)),
-        ]),
-      ),
-      _gap(),
-      // Battery choice
-      Panel(
-        border: sys.hasBattery ? C.amber.withValues(alpha: .6) : C.green.withValues(alpha: .6),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.battery_charging_full, color: sys.hasBattery ? C.orange : C.green, size: 20),
-            const SizedBox(width: 8),
-            Expanded(child: Text(sys.hasBattery ? 'Battery Backup Required' : 'Battery Not Required (Remote Grid)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5))),
-            uscPill(sys.hasBattery ? 'BATTERY INCLUDED' : 'NO BATTERY NEEDED', sys.hasBattery ? C.orange : C.green, solid: true),
-          ]),
-          const SizedBox(height: 8),
-          Text(
-            sys.hasBattery
-                ? 'Enter your battery backup value based on your ${_t(o.invKw)} kW inverter to size the battery bank.'
-                : 'Utility grid acts as virtual storage through bi-directional net metering. Battery packs and BMS parts are removed from this BOM.',
-            style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.4),
-          ),
-          const SizedBox(height: 10),
-          Row(children: [
-            sysCard('On-Grid', 'Battery NOT needed (grid net meter)', SysType.onGrid, C.green),
-            sysCard('Hybrid', 'Needed only for power-cut backup', SysType.hybrid, C.orange),
-            sysCard('Off-Grid', 'Mandatory, no grid night power', SysType.offGrid, C.orange),
-          ]),
-          if (sys.hasBattery) ...[
-            const SizedBox(height: 10),
-            _field(backup, 'Battery backup (hours)', hint: 'Enter hrs (inverter)', onChanged: _recalc),
-          ],
         ]),
       ),
       _gap(),
@@ -1234,165 +1129,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
-      // Required parts & BOM
-      Panel(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: C.green.withValues(alpha: .1), shape: BoxShape.circle), child: Icon(Icons.inventory_2_outlined, color: C.green, size: 20)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('REQUIRED PARTS & BOM (${parts.length} ACTIVE)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
-                Text('$sysName · ${dcr ? 'DCR ALMM' : 'Non-DCR'} · ${o.threePhase ? '3-Phase 415V' : '1-Phase 230V'}', style: TextStyle(color: C.mute, fontSize: 12)),
-              ]),
-            ),
-            if (!sys.hasBattery) uscPill('3 Auto-Removed', C.green),
-          ]),
-          if (!sys.hasBattery) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-              child: Text('Automatically removed for $sysName: battery storage bank, battery BMS harness and DC breaker (MCCB), battery mounting rack.', style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.35)),
-            ),
-          ],
-          const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(children: [
-              tab('All', parts.length),
-              tab('PV, Inv & Battery', 0),
-              tab('BOS & Structure', 0),
-              tab('Metering', 0),
-            ]),
-          ),
-          const SizedBox(height: 12),
-          for (final p in shown)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.line)),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Icon(Icons.check_circle_outline, color: C.green, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(p.$1, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5))),
-                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    uscPill(p.$3, C.green, solid: false),
-                    const SizedBox(height: 4),
-                    Text(p.$4, style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 10.5)),
-                  ]),
-                ]),
-                const SizedBox(height: 4),
-                Padding(padding: const EdgeInsets.only(left: 26), child: Text(p.$2, style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.35))),
-                const Divider(height: 16),
-                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Icon(Icons.description_outlined, size: 15, color: C.blue),
-                  const SizedBox(width: 6),
-                  Expanded(child: Text(p.$5, style: TextStyle(color: C.mute, fontSize: 12, height: 1.35))),
-                ]),
-              ]),
-            ),
-        ]),
-      ),
-      _gap(),
-      // 25-year ROI
-      Panel(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.trending_up, color: C.orange, size: 22),
-            const SizedBox(width: 8),
-            const Expanded(child: Text('25-Year ROI & Savings', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
-            OutlinedButton(
-              onPressed: () => setState(() => stage = 2),
-              child: Text('Full ROI View', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
-            ),
-          ]),
-          const SizedBox(height: 4),
-          Text('Cumulative savings vs system cost', style: TextStyle(color: C.mute, fontSize: 12.5)),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.line)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                const Expanded(child: Text('Payback Sensitivity Controls', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5))),
-                uscPill('Payback: $pbText', good ? C.green : C.red, solid: false),
-              ]),
-              const SizedBox(height: 8),
-              Row(children: [
-                const Expanded(child: Text('Expected annual tariff increase (%)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
-                Text('${escalation.toStringAsFixed(1)}% / yr', style: TextStyle(color: C.blue, fontWeight: FontWeight.w800)),
-              ]),
-              Slider(
-                value: escalation.clamp(0, 10).toDouble(),
-                min: 0,
-                max: 10,
-                divisions: 20,
-                onChanged: (v) {
-                  escalation = v;
-                  _recalc();
-                },
-              ),
-              Row(children: [
-                const Expanded(child: Text('System maintenance cost (%)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
-                Text('${omPct.toStringAsFixed(2)}% (${rupee(r.cost * omPct / 100)}/yr)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
-              ]),
-              Slider(
-                value: omPct.clamp(0, 5).toDouble(),
-                min: 0,
-                max: 5,
-                divisions: 20,
-                activeColor: C.orange,
-                onChanged: (v) {
-                  omPct = v;
-                  _recalc();
-                },
-              ),
-            ]),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-            child: Text('${_t(double.parse(o.kwp.toStringAsFixed(2)))} kWp (${dcr ? 'DCR' : 'Non-DCR'})\nTariff ₹${s.unitPrice.toStringAsFixed(1)}/kWh · Escalation +${escalation.toStringAsFixed(1)}%/yr',
-                style: TextStyle(fontFamily: 'monospace', color: C.text, fontSize: 13, height: 1.4)),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: (good ? C.green : C.red).withValues(alpha: .08), borderRadius: BorderRadius.circular(16), border: Border.all(color: (good ? C.green : C.red).withValues(alpha: .4))),
-            child: Row(children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('ESTIMATED BREAK-EVEN POINT', style: TextStyle(color: good ? C.green : C.red, fontWeight: FontWeight.w800, fontSize: 12)),
-                  Text(good ? 'Time to recover net system cost' : 'Not recovered within ${r.years} years', style: TextStyle(color: C.mute, fontSize: 12.5)),
-                ]),
-              ),
-              Text(good ? '${fmt1(pb!)} Years' : '${r.years}+ Years', style: TextStyle(color: good ? C.green : C.red, fontWeight: FontWeight.w800, fontSize: 22)),
-            ]),
-          ),
-          const SizedBox(height: 10),
-          IntrinsicHeight(
-            child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              _stat('PAYBACK', pbText, c: C.blue),
-              _stat('${r.years}-YR NET GAIN', rupee(r.lifetimeProfit), c: r.lifetimeProfit >= 0 ? C.green : C.red, sub: 'after O&M'),
-              _stat('LIFETIME ROI', '${r.roi.round()}%', c: r.roi >= 0 ? C.orange : C.red),
-            ]),
-          ),
-          const SizedBox(height: 12),
-          Text('Cumulative Savings vs System Cost', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: C.text)),
-          const SizedBox(height: 8),
-          NetChart(r.series.map((e) => e.net).toList()),
-          const SizedBox(height: 6),
-          Text('Bars below zero are money still to be recovered. Includes panel degradation, the yearly tariff rise and maintenance.', style: TextStyle(color: C.mute, fontSize: 12)),
-        ]),
-      ),
-      _gap(),
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -1424,9 +1160,57 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+      // Bill of Materials (BOM) & Interlink Breakdown inside Estimator Results
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          InkWell(
+            onTap: () => setState(() => bomOpen = !bomOpen),
+            child: Row(children: [
+              Icon(Icons.inventory_2_outlined, color: C.sky, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Required Parts & BOM (${bom.items.length} items)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  Text('${o.type.label} · ${dcr ? 'DCR ALMM' : 'Non-DCR'} · ${o.threePhase ? '3-Phase' : '1-Phase'}', style: TextStyle(color: C.mute, fontSize: 12)),
+                ]),
+              ),
+              if (bom.removed.isNotEmpty)
+                Container(
+                  margin: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)),
+                  child: Text('${bom.removed.length} Filtered', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11)),
+                ),
+              Icon(bomOpen ? Icons.expand_less : Icons.expand_more, color: C.mute),
+            ]),
+          ),
+          if (bomOpen) ...[
+            const SizedBox(height: 10),
+            Row(children: [
+              _chip('PV & Inv', bomTab == 0, () => setState(() => bomTab = 0)),
+              _chip('BOS & Str', bomTab == 1, () => setState(() => bomTab = 1)),
+              _chip('Metering', bomTab == 2, () => setState(() => bomTab = 2)),
+            ]),
+            const SizedBox(height: 10),
+            for (final item in bomFiltered)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.line)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text(item.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
+                    Text(rupee(item.price), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 13)),
+                  ]),
+                  const SizedBox(height: 2),
+                  Text('${item.qty} · ${item.spec}', style: TextStyle(color: C.mute, fontSize: 11.5)),
+                ]),
+              ),
+          ],
+        ]),
+      ),
+      _gap(),
       _bigButton('ROI Dashboard', () => setState(() => stage = 2), icon: Icons.trending_up),
-      const SizedBox(height: 10),
-      _bigButton('PDF Proposal Studio', () => _openPdfStudio(r), icon: Icons.picture_as_pdf_outlined),
       const SizedBox(height: 10),
       Row(children: [
         Expanded(child: OutlinedButton(onPressed: () => setState(() => stage = 3), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50), foregroundColor: C.text), child: const Text('Customer Page', style: TextStyle(fontWeight: FontWeight.w800)))),
@@ -1434,165 +1218,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
         Expanded(child: OutlinedButton(onPressed: _save, style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(50), foregroundColor: C.text), child: const Text('Save estimate', style: TextStyle(fontWeight: FontWeight.w800)))),
       ]),
     ];
-  }
-
-  /// PDF Proposal & Engineering Export Studio, as a bottom sheet.
-  void _openPdfStudio(EstimateResult r) {
-    final client = TextEditingController(text: name.text);
-    final installer = TextEditingController();
-    final ref = TextEditingController(text: 'SOL-${DateTime.now().year}-${r.panels * 60}');
-    final notes = TextEditingController();
-    const presets = [
-      ('Full Proposal', 'Charts + EMI + BOM'),
-      ('Executive Brief', 'KPIs + 25Yr ROI'),
-      ('Engineering Pack', 'Specs + Full BOM'),
-    ];
-    const sections = [
-      '12-Mo DISCOM Usage vs. Solar Chart',
-      '25-Yr Cashflow Chart & Schedule',
-      'Solar Loan / EMI Comparison Table',
-      'Complete Wrapped Bill of Materials (BOM)',
-      'Warranty & Client Sign-Off Block',
-    ];
-    const presetSections = [
-      [true, true, true, true, true],
-      [false, true, false, false, true],
-      [true, false, false, true, true],
-    ];
-    var preset = 0;
-    var included = [...presetSections[0]];
-    final o = opts[sys] ?? _options(r.monthlyUnits)[sys]!;
-    final sheetTitle = '${_t(double.parse(o.kwp.toStringAsFixed(2)))} kW ${dcr ? 'DCR' : 'Non-DCR'} · Charts, Sensitivity ROI, EMI & Full BOM';
-
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: C.card,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          Widget field(String label, TextEditingController c, {String? hint, int lines = 1}) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(label, style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12.5)),
-                  const SizedBox(height: 6),
-                  TextField(controller: c, minLines: lines, maxLines: lines, decoration: InputDecoration(hintText: hint, isDense: true)),
-                ]),
-              );
-          return SizedBox(
-            height: MediaQuery.of(ctx).size.height * .9,
-            child: Column(children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 12, 10),
-                child: Row(children: [
-                  Icon(Icons.description_outlined, color: C.blue, size: 26),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('PDF Proposal & Engineering Export Studio', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                      Text(sheetTitle, style: TextStyle(color: C.mute, fontSize: 12)),
-                    ]),
-                  ),
-                  IconButton(onPressed: () => Navigator.of(ctx).pop(), icon: const Icon(Icons.close)),
-                ]),
-              ),
-              Expanded(
-                child: ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 12), children: [
-                  Text('REPORT FORMAT PRESET', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12)),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    for (var i = 0; i < presets.length; i++)
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () => setSheet(() {
-                            preset = i;
-                            included = [...presetSections[i]];
-                          }),
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 3),
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: preset == i ? C.orange.withValues(alpha: .1) : C.card2,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: preset == i ? C.orange : C.line),
-                            ),
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(presets[i].$1, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
-                              const SizedBox(height: 4),
-                              Text(presets[i].$2, style: TextStyle(color: C.mute, fontSize: 11)),
-                            ]),
-                          ),
-                        ),
-                      ),
-                  ]),
-                  const SizedBox(height: 16),
-                  field('Customer / Client Name', client),
-                  field('Prepared By / Installer', installer, hint: 'e.g. SunTech EPC Pvt Ltd'),
-                  field('Proposal Ref #', ref),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.line)),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Included PDF Sections', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: C.text)),
-                      const SizedBox(height: 8),
-                      for (var i = 0; i < sections.length; i++)
-                        GestureDetector(
-                          onTap: () => setSheet(() => included[i] = !included[i]),
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            decoration: BoxDecoration(color: C.card, borderRadius: BorderRadius.circular(12), border: Border.all(color: included[i] ? C.green : C.line)),
-                            child: Row(children: [
-                              Icon(included[i] ? Icons.check_box : Icons.check_box_outline_blank, color: included[i] ? C.green : C.mute, size: 20),
-                              const SizedBox(width: 10),
-                              Expanded(child: Text(sections[i], style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: included[i] ? C.text : C.mute))),
-                            ]),
-                          ),
-                        ),
-                    ]),
-                  ),
-                  const SizedBox(height: 12),
-                  field('Site Notes & Commissioning Remarks (Optional)', notes, hint: 'e.g. Elevated HDG structure, AC/DC SPD included', lines: 3),
-                ]),
-              ),
-              Container(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
-                decoration: BoxDecoration(color: C.card2, border: Border(top: BorderSide(color: C.line))),
-                child: Column(children: [
-                  Row(children: [
-                    Expanded(child: OutlinedButton.icon(onPressed: () => toast(context, 'Preview comes in the next step'), icon: const Icon(Icons.visibility_outlined, size: 16), label: const Text('Preview PDF'))),
-                    const SizedBox(width: 8),
-                    Expanded(child: OutlinedButton.icon(onPressed: () => toast(context, 'Print comes in the next step'), icon: const Icon(Icons.print_outlined, size: 16), label: const Text('Print'))),
-                  ]),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    Expanded(child: OutlinedButton.icon(onPressed: () => toast(context, 'CSV comes in the next step'), icon: Icon(Icons.table_chart_outlined, size: 16, color: C.green), label: Text('CSV (BOM + ROI)', style: TextStyle(color: C.green)))),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(backgroundColor: C.orange, foregroundColor: Colors.white),
-                        onPressed: () {
-                          name.text = client.text;
-                          Navigator.of(ctx).pop();
-                          _quote(_readCustomer(), r);
-                        },
-                        icon: const Icon(Icons.download, size: 18),
-                        label: const Text('Download PDF', style: TextStyle(fontWeight: FontWeight.w800)),
-                      ),
-                    ),
-                  ]),
-                ]),
-              ),
-            ]),
-          );
-        },
-      ),
-    ).whenComplete(() {
-      client.dispose();
-      installer.dispose();
-      ref.dispose();
-      notes.dispose();
-    });
   }
 
   // ---------- 3. ROI dashboard ----------
@@ -1603,7 +1228,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     return [
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Investment Payback Period', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+          const Text('Investment Payback Period', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
           Text('${r.years}-year break-even & financial return model', style: TextStyle(color: C.mute, fontSize: 12.5)),
           _gap(10),
           Container(
@@ -1781,6 +1406,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final expected = kwp * y * 30;
     final pr = expected > 0 && act > 0 ? act / expected * 100 : 0.0;
     final ratio = inv > 0 ? kwp / inv : 0.0;
+    final snap = s.inverterSnap;
     DateTime? lastWash;
     for (final e in s.services) {
       if (e.type == ServiceType.cleaning && (lastWash == null || e.date.isAfter(lastWash))) lastWash = e.date;
@@ -1816,6 +1442,24 @@ class _EstimatorPageState extends State<EstimatorPage> {
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _title(Icons.health_and_safety_outlined, C.blue, 'Installed Equipment Specifications', 'Describe the plant to audit its performance'),
+          if (snap != null) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () {
+                setState(() {
+                  final rated = snap.ratedKw > 0 ? snap.ratedKw : s.site.kwp;
+                  final panelW = _num(exWp) > 0 ? _num(exWp) : 550.0;
+                  exQty.text = (rated * 1000 / panelW).round().toString();
+                  exInv.text = rated.toStringAsFixed(1);
+                  final mo = snap.monthKwh > 0 ? snap.monthKwh : snap.todayKwh * 30;
+                  if (mo > 0) exGen.text = mo.round().toString();
+                });
+                toast(context, 'Loaded live inverter metrics into audit.');
+              },
+              icon: const Icon(Icons.electric_bolt, size: 17),
+              label: Text('Load from Connected Inverter (${snap.brand.toUpperCase()})', style: const TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ],
           _gap(),
           Row(children: [
             Expanded(child: _field(exWp, 'Panel wattage', suffix: 'W')),
@@ -1876,24 +1520,44 @@ class _EstimatorPageState extends State<EstimatorPage> {
     ];
   }
 
-  // ---------- Generation ----------
+  // ---------- Standalone Generation Calculator ----------
   List<Widget> _generation() {
     final r = s.result;
-    if (r == null) {
-      return [
-        Panel(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _title(Icons.flash_on, C.green, 'Power Generation & Yield', 'Run a New Install calculation first'),
-            _gap(10),
-            FilledButton(onPressed: () => setState(() => tab = 0), style: FilledButton.styleFrom(backgroundColor: C.orange), child: const Text('Go to New Install', style: TextStyle(fontWeight: FontWeight.w800))),
-          ]),
-        ),
-      ];
-    }
-    final tariff = s.input.tariff;
-    final flow = energyFlow(monthlyGen: r.monthlyGen, monthlyUse: r.monthlyUnits, tariff: tariff, exportRate: s.st.exportRate);
-    final cover = r.monthlyUnits > 0 ? (flow.selfUse / r.monthlyUnits * 100).round() : 0;
+    final kw = _num(genKw) > 0 ? _num(genKw) : (r?.kw ?? s.site.kwp);
+    final use = _num(genUse) > 0 ? _num(genUse) : (r?.monthlyUnits ?? 400.0);
+    final tariff = _num(genTariff) > 0 ? _num(genTariff) : (r != null ? s.input.tariff : s.unitPrice);
+    final y = s.locationYield;
+    final dailyGen = kw * y;
+    final annualGen = dailyGen * 365;
+    final monthlyGen = annualGen / 12;
+
+    final flow = energyFlow(monthlyGen: monthlyGen, monthlyUse: use, tariff: tariff, exportRate: s.st.exportRate);
+    final cover = use > 0 ? (flow.selfUse / use * 100).round() : 0;
+
     return [
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _title(Icons.flash_on, C.green, 'Power Generation & Yield Calculator', '${s.site.city} · ${y.toStringAsFixed(2)} kWh/kWp/day location yield'),
+          _gap(12),
+          Row(children: [
+            Expanded(child: _field(genKw, 'System size', suffix: 'kW')),
+            const SizedBox(width: 10),
+            Expanded(child: _field(genUse, 'Monthly usage', suffix: 'kWh')),
+          ]),
+          const SizedBox(height: 10),
+          _field(genTariff, 'Tariff rate (blank = ₹${tariff.toStringAsFixed(2)})', prefix: '₹ ', suffix: '/kWh'),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final preset in const [1.0, 2.0, 3.0, 5.0, 10.0])
+              ChoiceChip(
+                label: Text('${_t(preset)} kW', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                selected: (kw - preset).abs() < 0.05,
+                onSelected: (_) => setState(() => genKw.text = _t(preset)),
+              ),
+          ]),
+        ]),
+      ),
+      _gap(),
       Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(26), gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF0F9B8E), Color(0xFF0B6E8A)])),
@@ -1902,18 +1566,18 @@ class _EstimatorPageState extends State<EstimatorPage> {
             const Icon(Icons.flash_on, color: Colors.white, size: 18),
             const SizedBox(width: 6),
             const Expanded(child: Text('ESTIMATED POWER GENERATION', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: .4))),
-            Text('${_t(double.parse(r.kw.toStringAsFixed(2)))} kW System', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text('${_t(double.parse(kw.toStringAsFixed(2)))} kW System', style: const TextStyle(color: Colors.white70, fontSize: 12)),
           ]),
           const SizedBox(height: 8),
           Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-            Text(groupIndian(r.monthlyGen), style: const TextStyle(color: Colors.white, fontSize: 44, fontWeight: FontWeight.w800)),
+            Text(groupIndian(monthlyGen), style: const TextStyle(color: Colors.white, fontSize: 44, fontWeight: FontWeight.w800)),
             const SizedBox(width: 8),
             const Text('kWh / Month', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700)),
           ]),
           const Divider(color: Colors.white24),
           Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Daily Generation', style: TextStyle(color: Colors.white70, fontSize: 11.5)), Text('${(r.gen1 / 365).toStringAsFixed(1)} kWh/day', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))])),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Annual Energy Output', style: TextStyle(color: Colors.white70, fontSize: 11.5)), Text('${groupIndian(r.gen1)} kWh/yr', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Daily Generation', style: TextStyle(color: Colors.white70, fontSize: 11.5)), Text('${dailyGen.toStringAsFixed(1)} kWh/day', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Annual Energy Output', style: TextStyle(color: Colors.white70, fontSize: 11.5)), Text('${groupIndian(annualGen)} kWh/yr', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))])),
           ]),
         ]),
       ),
@@ -1947,7 +1611,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
     ];
   }
 
-
   List<Widget> _saved() {
     final s = widget.state;
     final q = search.text.trim();
@@ -1956,13 +1619,13 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ? s.records
         : s.records.where((r) {
             final c = r.customer;
-            return [c.name, c.phone, c.address].any((x) => x.toLowerCase().contains(ql));
+            return [c.usc, c.name, c.phone, c.address].any((x) => x.toLowerCase().contains(ql));
           }).toList();
     return [
       TextField(
         controller: search,
         onChanged: (_) => setState(() {}),
-        decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search by name, phone or address'),
+        decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search by USC, name, phone or address'),
       ),
       const SizedBox(height: 12),
       if (rows.isEmpty)
@@ -1991,7 +1654,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(c.name.isEmpty ? 'Unnamed customer' : c.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
           const SizedBox(height: 2),
-          Text('${c.phone.isEmpty ? 'No phone' : c.phone}${c.address.isEmpty ? '' : '\n${c.address}'}', style: TextStyle(color: C.mute, fontSize: 12.5)),
+          Text('${c.usc.isEmpty ? '' : 'USC ${c.usc} · '}${c.phone.isEmpty ? 'No phone' : c.phone}${c.address.isEmpty ? '' : '\n${c.address}'}', style: TextStyle(color: C.mute, fontSize: 12.5)),
           const SizedBox(height: 8),
           Text('${fmt1(r.kw)} kW · ${r.panels} panels · Net ${inr(r.netCost)} · Payback ${r.paybackYears == null ? '-' : '${fmt1(r.paybackYears!)} yrs'}', style: const TextStyle(fontSize: 13.5)),
           const SizedBox(height: 10),
@@ -2038,10 +1701,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   Future<void> _copyCsv(AppState s) async {
     String q(String v) => '"${v.replaceAll('"', '""')}"';
-    final lines = <String>[['Name', 'Phone', 'Address', 'kW', 'Panels', 'Net cost (Rs)', 'Payback (yrs)'].map(q).join(',')];
+    final lines = <String>[['USC', 'Name', 'Phone', 'Address', 'kW', 'Panels', 'Net cost (Rs)', 'Payback (yrs)'].map(q).join(',')];
     for (final rec in s.records) {
       final r = rec.result;
       lines.add([
+        rec.customer.usc,
         rec.customer.name,
         rec.customer.phone,
         rec.customer.address,

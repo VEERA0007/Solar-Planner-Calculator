@@ -5,7 +5,7 @@ import '../core/calc.dart';
 import '../core/i18n.dart';
 import '../core/store.dart';
 import '../core/sun.dart';
-import 'connect_sheet.dart';
+import 'inverter_sync_sheet.dart';
 import 'location_sheet.dart';
 import 'profile_dialog.dart';
 import 'settings_dialog.dart';
@@ -18,6 +18,7 @@ String fmtTrim(double v) {
 }
 
 String _two(int n) => n.toString().padLeft(2, '0');
+
 String clock12(DateTime d, {bool seconds = false}) {
   final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
   return '${_two(h)}:${_two(d.minute)}${seconds ? ':${_two(d.second)}' : ''} ${d.hour < 12 ? 'AM' : 'PM'}';
@@ -65,6 +66,69 @@ class _HomePageState extends State<HomePage> {
     return _info!;
   }
 
+  void _showMetricDetail({
+    required BuildContext context,
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String headline,
+    required List<(String label, String value)> rows,
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: C.card,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(color: color.withValues(alpha: .16), borderRadius: BorderRadius.circular(14)),
+                child: Icon(icon, color: color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  Text(headline, style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 14)),
+                ]),
+              ),
+              IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+            ]),
+            Divider(color: C.line, height: 22),
+            for (final r in rows)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(children: [
+                  Expanded(child: Text(r.$1, style: TextStyle(color: C.mute, fontWeight: FontWeight.w600))),
+                  Text(r.$2, style: const TextStyle(fontWeight: FontWeight.w800)),
+                ]),
+              ),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    onAction();
+                  },
+                  style: FilledButton.styleFrom(backgroundColor: C.orange, minimumSize: const Size.fromHeight(48)),
+                  child: Text(actionLabel, style: const TextStyle(fontWeight: FontWeight.w800)),
+                ),
+              ),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = widget.state;
@@ -86,7 +150,8 @@ class _HomePageState extends State<HomePage> {
       }
     }
     soFar = soFar / 1000 * site.kwp * s.pr;
-    final live = irr == null ? 0.0 : site.kwp * irr.ghi / 1000 * s.pr;
+    final snap = s.inverterSnap;
+    final live = snap != null && snap.currentKw > 0 ? snap.currentKw : (irr == null ? 0.0 : site.kwp * irr.ghi / 1000 * s.pr);
     final load = s.dailyLoad;
     final act = s.activeNow(now);
     final net = potential - load;
@@ -116,7 +181,6 @@ class _HomePageState extends State<HomePage> {
     }
 
     final subtitle = site.label.isEmpty ? (s.profile.address) : site.label;
-
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
@@ -158,9 +222,7 @@ class _HomePageState extends State<HomePage> {
             _Avatar(s.profile.name, () => showProfileDialog(context, s)),
           ]),
         ),
-        // ---------- connect inverter, logger and bill ----------
-        const ConnectCard(),
-        const SizedBox(height: 12),
+
         // ---------- date + live clock ----------
         Panel(
           radius: 22,
@@ -185,6 +247,7 @@ class _HomePageState extends State<HomePage> {
           ]),
         ),
         const SizedBox(height: 12),
+
         // ---------- hourly auto-sync ----------
         Panel(
           radius: 22,
@@ -234,6 +297,50 @@ class _HomePageState extends State<HomePage> {
           ]),
         ),
         const SizedBox(height: 12),
+
+        // ---------- 2-option live inverter hub ----------
+        Panel(
+          radius: 22,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          onTap: () => showInverterSyncDialog(context, s),
+          child: Row(children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(color: snap != null ? C.chipGreen : C.chipSun, borderRadius: BorderRadius.circular(13)),
+              child: Icon(Icons.electric_bolt, color: snap != null ? C.green : C.orange, size: 22),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  snap == null
+                      ? 'Inverter Live Sync'
+                      : (snap.plantName.isEmpty ? '${snap.brand.toUpperCase()} Live' : snap.plantName),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5),
+                ),
+                Text(
+                  snap == null
+                      ? 'Manufacturer Website Login · API Integration'
+                      : '${snap.currentKw.toStringAsFixed(2)} kW live · ${fmt1(snap.todayKwh)} kWh today · Logger ${snap.loggerStatus}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: snap != null ? C.green : C.mute, fontSize: 12),
+                ),
+              ]),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(12)),
+              child: Text(snap == null ? 'Connect' : 'Manage', style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 12)),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 12),
+
         // ---------- sun card: animated scene fills the card ----------
         Panel(
           radius: 24,
@@ -308,12 +415,12 @@ class _HomePageState extends State<HomePage> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text.rich(
-                      TextSpan(children: [
-                        TextSpan(text: '${t('peak_at')} : '),
-                        TextSpan(text: info.noon == null ? '-' : clock12(info.noon!), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
-                      ]),
-                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: night ? Colors.white : const Color(0xFF1F2937)),
-                      ),
+                          TextSpan(children: [
+                            TextSpan(text: '${t('peak_at')} : '),
+                            TextSpan(text: info.noon == null ? '-' : clock12(info.noon!), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
+                          ]),
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: night ? Colors.white : const Color(0xFF1F2937)),
+                        ),
                       ),
                     ),
                   ),
@@ -323,7 +430,8 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         const SizedBox(height: 16),
-        // ---------- heading + sky chip (adapts: one row when wide, stacked when narrow) ----------
+
+        // ---------- heading + sky chip ----------
         LayoutBuilder(builder: (context, box) {
           final heading = Text(t('energy_balance'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1.25));
           final hint = Text(t('tap_metric'), style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.3));
@@ -367,7 +475,8 @@ class _HomePageState extends State<HomePage> {
           ]);
         }),
         const SizedBox(height: 12),
-        // ---------- 4 display-only metric cards ----------
+
+        // ---------- 4 tappable metric cards ----------
         _pair(
           _Metric(
             icon: Icons.wb_sunny_outlined, iconBg: C.chipSun, iconColor: C.sun,
@@ -376,12 +485,43 @@ class _HomePageState extends State<HomePage> {
             unit: 'kWh', unitColor: C.amber,
             foot1: '${live.toStringAsFixed(2)} kW ${t('live_word')}', foot2: '${(irr?.ghi ?? 0).round()} W/m²',
             desc: '${t('desc_yield')} ${site.kwp} ${t('desc_plant')}',
+            onTap: () => _showMetricDetail(
+              context: context,
+              icon: Icons.wb_sunny_outlined,
+              color: C.amber,
+              title: t('potential_gain'),
+              headline: '${potential.toStringAsFixed(1)} kWh forecast today',
+              rows: [
+                ('Configured plant size', '${site.kwp} kWp'),
+                ('Generated so far today', '${soFar.toStringAsFixed(2)} kWh'),
+                ('Live AC power', '${live.toStringAsFixed(2)} kW${snap != null ? ' (Inverter)' : ' (Irradiance)'}'),
+                ('Current GHI / DNI', '${(irr?.ghi ?? 0).round()} / ${(irr?.dni ?? 0).round()} W/m²'),
+                ('Performance Ratio (PR)', '${(s.pr * 100).toStringAsFixed(1)}%'),
+              ],
+              actionLabel: 'Open Solar Analysis',
+              onAction: () => s.setTab(3),
+            ),
           ),
           _Metric(
             icon: Icons.monitor_heart_outlined, iconBg: C.chipBlue, iconColor: C.sky,
             name: t('actual_usage'), value: load.toStringAsFixed(1), unit: 'kWh', unitColor: C.sky,
             foot1: '${act.kw.toStringAsFixed(2)} kW ${t('active_word')}', foot2: '${s.appliances.length} ${t('appliances_word')}',
             desc: t('desc_load'),
+            onTap: () => _showMetricDetail(
+              context: context,
+              icon: Icons.monitor_heart_outlined,
+              color: C.sky,
+              title: t('actual_usage'),
+              headline: '${load.toStringAsFixed(1)} kWh / day estimated load',
+              rows: [
+                ('Active appliances right now', '${act.n} (${act.kw.toStringAsFixed(2)} kW)'),
+                ('Total appliances listed', '${s.appliances.length}'),
+                ('Estimated monthly usage', '${(load * 30).round()} kWh / month'),
+                ('Current DISCOM slab', s.slabText.isEmpty ? 'Standard' : s.slabText),
+              ],
+              actionLabel: 'Open Appliance Analysis',
+              onAction: () => s.setTab(2),
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -392,15 +532,46 @@ class _HomePageState extends State<HomePage> {
             value: '${net >= 0 ? '+' : '-'}${net.abs().toStringAsFixed(1)}', unit: 'kWh', unitColor: C.amber,
             foot1: '${t('offset_word')}: $offset%', foot2: net >= 0 ? t('self_sufficient') : t('grid_reliance'), foot2Color: C.amber,
             desc: net >= 0 ? t('desc_surplus') : t('desc_deficit'),
+            onTap: () => _showMetricDetail(
+              context: context,
+              icon: Icons.compare_arrows,
+              color: C.orange,
+              title: net >= 0 ? t('grid_surplus') : t('grid_deficit'),
+              headline: '${net >= 0 ? '+' : '-'}${net.abs().toStringAsFixed(1)} kWh daily net balance',
+              rows: [
+                ('Solar generation (today)', '${potential.toStringAsFixed(1)} kWh'),
+                ('Home/site consumption', '${load.toStringAsFixed(1)} kWh'),
+                ('Self-consumed solar', '${used.toStringAsFixed(1)} kWh ($offset% offset)'),
+                ('Export feed-in rate', s.exportRate == null ? 'Net metering banking' : '₹${s.exportRate!.toStringAsFixed(2)} / kWh'),
+              ],
+              actionLabel: 'Open Estimator',
+              onAction: () => s.setTab(1),
+            ),
           ),
           _Metric(
             icon: Icons.auto_awesome, iconBg: C.chipPurple, iconColor: C.purple,
             name: t('financial_value'), value: '₹${groupIndian(used * s.unitPrice)}', unit: t('saved_word'), unitColor: C.green,
             foot1: '${fmt1(potential * kCo2PerKwh)} kg CO₂', foot2: t('clean_offset'), foot2Color: C.green,
             desc: '@ ₹${fmtTrim(s.unitPrice)}/kWh ${t('tariff_word')}',
+            onTap: () => _showMetricDetail(
+              context: context,
+              icon: Icons.auto_awesome,
+              color: C.green,
+              title: t('financial_value'),
+              headline: '₹${groupIndian(used * s.unitPrice)} saved today',
+              rows: [
+                ('Marginal tariff rate', '₹${fmtTrim(s.unitPrice)} / kWh (${s.discom.name})'),
+                ('Estimated monthly savings', '₹${groupIndian(used * s.unitPrice * 30)}'),
+                ('Estimated annual savings', '₹${groupIndian(used * s.unitPrice * 365)}'),
+                ('CO₂ avoided today', '${fmt1(potential * kCo2PerKwh)} kg'),
+              ],
+              actionLabel: 'View ROI in Estimator',
+              onAction: () => s.setTab(1),
+            ),
           ),
         ),
         const SizedBox(height: 14),
+
         // ---------- solar vs load ----------
         Panel(
           radius: 24,
@@ -431,6 +602,7 @@ class _HomePageState extends State<HomePage> {
             ]),
           ]),
         ),
+
         if (due != null && due <= 7) ...[
           const SizedBox(height: 12),
           Panel(
@@ -509,12 +681,13 @@ class _Avatar extends StatelessWidget {
   }
 }
 
-/// Display-only metric card (no tap action).
+/// Interactive metric card with tap breakdown modal.
 class _Metric extends StatelessWidget {
   final IconData icon;
   final Color iconBg, iconColor, unitColor;
   final String name, value, unit, desc, foot1, foot2;
   final Color? foot2Color;
+  final VoidCallback? onTap;
   const _Metric({
     required this.icon,
     required this.iconBg,
@@ -527,12 +700,15 @@ class _Metric extends StatelessWidget {
     required this.foot1,
     required this.foot2,
     this.foot2Color,
+    this.onTap,
   });
+
   @override
   Widget build(BuildContext context) {
     return Panel(
       radius: 24,
       padding: const EdgeInsets.all(14),
+      onTap: onTap,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Container(

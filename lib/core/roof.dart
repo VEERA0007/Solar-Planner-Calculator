@@ -24,15 +24,6 @@ double polygonArea(List<Pt> p) {
   return a.abs() / 2;
 }
 
-double polygonPerimeter(List<Pt> p) {
-  var s = 0.0;
-  for (var i = 0; i < p.length; i++) {
-    final j = (i + 1) % p.length;
-    s += math.sqrt(math.pow(p[j].x - p[i].x, 2) + math.pow(p[j].y - p[i].y, 2));
-  }
-  return s;
-}
-
 bool pointInPolygon(Pt q, List<Pt> p) {
   var inside = false;
   for (var i = 0, j = p.length - 1; i < p.length; j = i++) {

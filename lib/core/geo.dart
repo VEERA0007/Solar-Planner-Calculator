@@ -100,11 +100,3 @@ Future<List<GeoHit>> searchPlaces(String q) async {
     return [];
   }
 }
-
-double distanceKm(double la1, double lo1, double la2, double lo2) {
-  const r = 6371.0;
-  final dLa = (la2 - la1) * math.pi / 180, dLo = (lo2 - lo1) * math.pi / 180;
-  final a = math.pow(math.sin(dLa / 2), 2) +
-      math.cos(la1 * math.pi / 180) * math.cos(la2 * math.pi / 180) * math.pow(math.sin(dLo / 2), 2);
-  return 2 * r * math.asin(math.sqrt(a));
-}

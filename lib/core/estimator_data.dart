@@ -37,14 +37,6 @@ const kInverterBrands = <SysType, List<String>>{
 };
 
 /// Plain-language note on the inverter-to-array ratio.
-String inverterAdvice(SysOption o) {
-  final ratio = o.invKw > 0 ? o.kwp / o.invKw : 0;
-  final r = ratio.toStringAsFixed(2);
-  if (ratio > 1.3) return 'DC/AC ratio $r is high. Panels may clip at noon, so consider a larger inverter.';
-  if (ratio < 0.85) return 'DC/AC ratio $r leaves headroom for adding panels later or heavy starting loads.';
-  return 'DC/AC ratio $r is in the normal 0.9 to 1.3 range.';
-}
-
 /// Monthly energy split between your own use, export and grid import.
 class EnergyFlow {
   final double selfUse, export, import, monthlyValue, annualValue;

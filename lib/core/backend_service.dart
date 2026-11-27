@@ -174,6 +174,9 @@ const List<(String id, String label, String portalUrl)> kInverterBrands = [
   ('growatt', 'Growatt ShineServer', 'https://server.growatt.com'),
   ('sungrow', 'Sungrow iSolarCloud', 'https://www.isolarcloud.com'),
   ('goodwe', 'GoodWe SEMS Portal', 'https://www.semsportal.com'),
+  ('polygun', 'Polygun / Polycab Solar', 'https://minvertermonitoring.polycab.com'),
+  ('pure', 'PURE / PuREPower Solar', 'https://pureenergy.co.in'),
+  ('hitachi', 'Hitachi Solar (Hi-Rel)', 'https://www.hitachi-hirel.com'),
 ];
 
 /// Saved configuration for the 2-option Inverter Sync Hub.
@@ -1280,65 +1283,60 @@ class BackendService {
     }
 
     final base = cleanBaseUrl(rawBaseUrl);
-    if (base.isEmpty) {
-      return (
-        ok: false,
-        snapshot: null,
-        error: isApi
-            ? 'Enter either a Custom API Endpoint URL above, or configure your Backend Server URL in Settings → Display for manufacturer API signing.'
-            : 'Configure your Backend Server URL in Settings → Display to log into manufacturer websites without CORS blocks.',
-      );
+    if (base.isNotEmpty) {
+      try {
+        final payload = <String, dynamic>{
+          'brand': config.brand,
+          'authMode': isApi ? 'api' : 'website',
+          'stationId': config.stationId.trim(),
+          'loggerSerial': config.loggerSerial.trim(),
+          'inverterSerial': config.inverterSerial.trim(),
+        };
+        if (isApi) {
+          payload['apiKey'] = config.apiKey.trim();
+          payload['apiSecret'] = apiSecret;
+        } else {
+          payload['username'] = config.username.trim();
+          payload['password'] = password;
+        }
+
+        final resp = await http
+            .post(
+              Uri.parse('$base/api/inverter/portal-sync'),
+              headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
+              body: jsonEncode(payload),
+            )
+            .timeout(const Duration(seconds: 25));
+
+        final j = _tryJsonMap(resp.body);
+        if (resp.statusCode == 200 && j != null && j['ok'] != false) {
+          final dataMap = (j['telemetry'] is Map)
+              ? (j['telemetry'] as Map).cast<String, dynamic>()
+              : (j['data'] is Map ? (j['data'] as Map).cast<String, dynamic>() : j);
+          return (
+            ok: true,
+            snapshot: _parseSnapshot({...j, ...dataMap}, config.brand, config.authMode),
+            error: null,
+          );
+        }
+        // If backend returned an explicit credential/validation error (4xx), surface it;
+        // otherwise fall through to direct native manufacturer sync.
+        if (resp.statusCode >= 400 && resp.statusCode < 500 && j != null) {
+          final msg = _str(j['error'] ?? j['message']);
+          if (msg.isNotEmpty) {
+            return (ok: false, snapshot: null, error: msg);
+          }
+        }
+      } catch (_) {
+        // Backend unreachable — fall back to direct native manufacturer sync below.
+      }
     }
 
-    try {
-      final payload = <String, dynamic>{
-        'brand': config.brand,
-        'authMode': isApi ? 'api' : 'website',
-        'stationId': config.stationId.trim(),
-        'loggerSerial': config.loggerSerial.trim(),
-        'inverterSerial': config.inverterSerial.trim(),
-      };
-      if (isApi) {
-        payload['apiKey'] = config.apiKey.trim();
-        payload['apiSecret'] = apiSecret;
-      } else {
-        payload['username'] = config.username.trim();
-        payload['password'] = password;
-      }
-
-      final resp = await http
-          .post(
-            Uri.parse('$base/api/inverter/portal-sync'),
-            headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
-            body: jsonEncode(payload),
-          )
-          .timeout(const Duration(seconds: 30));
-
-      final dynamic raw = jsonDecode(resp.body);
-      if (raw is! Map) {
-        return (ok: false, snapshot: null, error: 'Unexpected server response.');
-      }
-      final j = raw.cast<String, dynamic>();
-      if (resp.statusCode != 200 || j['ok'] == false) {
-        return (
-          ok: false,
-          snapshot: null,
-          error: (j['error'] ?? j['message'] ?? 'Inverter sync failed (HTTP ${resp.statusCode}).').toString(),
-        );
-      }
-
-      final dataMap = (j['telemetry'] is Map)
-          ? (j['telemetry'] as Map).cast<String, dynamic>()
-          : (j['data'] is Map ? (j['data'] as Map).cast<String, dynamic>() : j);
-
-      return (
-        ok: true,
-        snapshot: _parseSnapshot({...j, ...dataMap}, config.brand, config.authMode),
-        error: null,
-      );
-    } catch (e) {
-      return (ok: false, snapshot: null, error: 'Inverter sync failed: $e');
-    }
+    return _syncInverterDirect(
+      config: config,
+      password: password,
+      apiSecret: apiSecret,
+    );
   }
 
   // -------------------- Internal parsing helpers --------------------
@@ -1481,5 +1479,2524 @@ class BackendService {
       syncedAt: DateTime.now().millisecondsSinceEpoch,
       note: (j['note'] ?? j['message'] ?? '').toString(),
     );
+  }
+
+  // -------------------- Direct Native Manufacturer Inverter Sync --------------------
+
+  static const String _ua =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  static String? _solisWebPrefix;
+  static String? _solisWebKey;
+  static String _solisWebVersion = '5.3.121';
+  static int _solisWebFetchedAtMs = 0;
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncInverterDirect({
+    required InverterConfig config,
+    required String password,
+    required String apiSecret,
+  }) async {
+    final brand = config.brand.trim().toLowerCase();
+    try {
+      switch (brand) {
+        case 'soliscloud':
+        case 'solis':
+          return await _syncSolisCloudDirect(config, password, apiSecret);
+        case 'goodwe':
+          return await _syncGoodWeDirect(config, password);
+        case 'growatt':
+          return await _syncGrowattDirect(config, password);
+        case 'solarman':
+        case 'deye':
+          return await _syncSolarmanDirect(config, password, apiSecret);
+        case 'sungrow':
+          return await _syncSungrowDirect(config, password);
+        case 'polygun':
+        case 'polycab':
+          return await _syncPolygunDirect(config, password, apiSecret);
+        case 'pure':
+        case 'purepower':
+          return await _syncPureDirect(config, password, apiSecret);
+        case 'hitachi':
+          return await _syncHitachiDirect(config, password, apiSecret);
+        default:
+          return (
+            ok: false,
+            snapshot: null,
+            error:
+                'Unsupported inverter brand "$brand". Select SolisCloud, Solarman, Growatt, Sungrow, GoodWe, Polygun/Polycab, PURE, or Hitachi.',
+          );
+      }
+    } catch (e) {
+      return (
+        ok: false,
+        snapshot: null,
+        error: 'Direct inverter sync failed: $e',
+      );
+    }
+  }
+
+  // ---- Shared inverter telemetry helpers ----
+
+  static Map<String, dynamic>? _asMap(dynamic v) =>
+      v is Map ? v.cast<String, dynamic>() : null;
+
+  static List<Map<String, dynamic>> _asListOfMaps(dynamic v) {
+    if (v is! List) return const [];
+    return v.whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
+  }
+
+  static String _pickStr(Map<String, dynamic>? m, List<String> keys) {
+    if (m == null) return '';
+    for (final k in keys) {
+      final v = m[k];
+      if (v != null) {
+        final s = v.toString().trim();
+        if (s.isNotEmpty) return s;
+      }
+    }
+    return '';
+  }
+
+  static double? _pickNum(Map<String, dynamic>? m, List<String> keys) {
+    if (m == null) return null;
+    for (final k in keys) {
+      final v = _optDouble(m[k]);
+      if (v != null) return v;
+    }
+    return null;
+  }
+
+  static double? _toKwSmart(double? val, String unitHint) {
+    if (val == null) return null;
+    final u = unitHint.trim().toLowerCase();
+    if (u == 'mw' || u == 'mwp') return val * 1000.0;
+    if (u == 'kw' || u == 'kwp') return val;
+    if (u == 'w' || u == 'wp') return val / 1000.0;
+    return val > 200.0 ? val / 1000.0 : val;
+  }
+
+  static String _normSerial(String s) =>
+      s.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toUpperCase();
+
+  static bool _serialsMatch(String a, String b) {
+    final na = _normSerial(a);
+    final nb = _normSerial(b);
+    if (na.isEmpty || nb.isEmpty) return false;
+    return na == nb || na.contains(nb) || nb.contains(na);
+  }
+
+  static String _sanitizeDateKey(String raw) {
+    final s = raw.trim();
+    final m = RegExp(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})').firstMatch(s);
+    if (m != null) {
+      final y = m.group(1)!;
+      final mo = m.group(2)!.padLeft(2, '0');
+      final d = m.group(3)!.padLeft(2, '0');
+      return '$y-$mo-$d';
+    }
+    return '';
+  }
+
+  static double _round2(double v) => (v * 100.0).roundToDouble() / 100.0;
+
+  static String _istYearMonth() {
+    final ist = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+    final y = ist.year.toString().padLeft(4, '0');
+    final m = ist.month.toString().padLeft(2, '0');
+    return '$y-$m';
+  }
+
+  static String _mergeCookies(String existing, String? rawSetCookie) {
+    final jar = <String, String>{};
+    if (existing.isNotEmpty) {
+      for (final part in existing.split(';')) {
+        final idx = part.indexOf('=');
+        if (idx > 0) {
+          final k = part.substring(0, idx).trim();
+          final v = part.substring(idx + 1).trim();
+          if (k.isNotEmpty && v.isNotEmpty) jar[k] = v;
+        }
+      }
+    }
+    if (rawSetCookie != null && rawSetCookie.isNotEmpty) {
+      const attrs = {
+        'path',
+        'domain',
+        'expires',
+        'max-age',
+        'samesite',
+        'secure',
+        'httponly',
+        'priority',
+      };
+      for (final m in RegExp(r'([A-Za-z0-9_\-\.]+)=([^;,\r\n]+)').allMatches(rawSetCookie)) {
+        final k = (m.group(1) ?? '').trim();
+        final v = (m.group(2) ?? '').trim();
+        if (k.isEmpty || v.isEmpty || attrs.contains(k.toLowerCase())) continue;
+        jar[k] = v;
+      }
+    }
+    return jar.entries.map((e) => '${e.key}=${e.value}').join('; ');
+  }
+
+  static String _cookieValue(String cookieJar, List<String> names) {
+    if (cookieJar.isEmpty) return '';
+    final lower = names.map((e) => e.toLowerCase()).toSet();
+    for (final part in cookieJar.split(';')) {
+      final idx = part.indexOf('=');
+      if (idx <= 0) continue;
+      final k = part.substring(0, idx).trim();
+      final v = part.substring(idx + 1).trim();
+      if (v.isNotEmpty && lower.contains(k.toLowerCase())) return v;
+    }
+    return '';
+  }
+
+  // ==================== 1. SOLISCLOUD (Website Login + Official API) ====================
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncSolisCloudDirect(
+    InverterConfig config,
+    String password,
+    String apiSecret,
+  ) async {
+    final isApi = config.authMode == 'api';
+    final keyId = (config.apiKey.trim().isNotEmpty ? config.apiKey.trim() : config.username.trim());
+    final keySec = (apiSecret.trim().isNotEmpty ? apiSecret.trim() : password.trim());
+    final looksKeyId = RegExp(r'^\d{15,24}$').hasMatch(keyId);
+    final useOfficialApi = (isApi && keyId.isNotEmpty && keySec.isNotEmpty) ||
+        (looksKeyId && keySec.length >= 16);
+
+    if (isApi && !useOfficialApi) {
+      return (
+        ok: false,
+        snapshot: null,
+        error: 'Enter your SolisCloud API KeyID and KeySecret, or switch to Manufacturer Website Login.',
+      );
+    }
+
+    if (useOfficialApi) {
+      return _syncSolisCloudApiDirect(config, keyId, keySec);
+    }
+    return _syncSolisCloudWebDirect(config, password);
+  }
+
+  static Future<({String prefix, String webKey, String version})> _getSolisWebConfig({
+    bool forceRefresh = false,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!forceRefresh &&
+        _solisWebPrefix != null &&
+        _solisWebKey != null &&
+        (now - _solisWebFetchedAtMs) < 12 * 60 * 60 * 1000) {
+      return (prefix: _solisWebPrefix!, webKey: _solisWebKey!, version: _solisWebVersion);
+    }
+
+    final loginResp = await http
+        .get(
+          Uri.parse('https://www.soliscloud.com/login'),
+          headers: const {
+            'User-Agent': _ua,
+            'Accept': 'text/html,application/xhtml+xml,*/*',
+          },
+        )
+        .timeout(const Duration(seconds: 15));
+
+    final jsMatch = RegExp(r'''https://ui-cdn\.soliscloud\.com[^"'<>]*?/index-[A-Za-z0-9_\-]+\.js''')
+        .firstMatch(loginResp.body);
+    if (jsMatch == null || jsMatch.group(0) == null) {
+      throw Exception('Could not load SolisCloud web portal bundle.');
+    }
+
+    final bundleResp = await http
+        .get(
+          Uri.parse(jsMatch.group(0)!),
+          headers: const {'User-Agent': _ua},
+        )
+        .timeout(const Duration(seconds: 18));
+    final bundleTxt = bundleResp.body;
+
+    final prefixMatch = RegExp(r'"(WEB \d+:)"\+').firstMatch(bundleTxt);
+    if (prefixMatch == null || prefixMatch.group(1) == null) {
+      throw Exception('Could not initialize SolisCloud web portal handshake.');
+    }
+    final prefix = prefixMatch.group(1)!;
+    final kyIdx = prefixMatch.start;
+    final start = kyIdx > 6000 ? kyIdx - 6000 : 0;
+    final end = (kyIdx + 120) < bundleTxt.length ? kyIdx + 120 : bundleTxt.length;
+    final keyWindow = bundleTxt.substring(start, end);
+
+    final arrMatches = RegExp(r'=\[("[A-Za-z0-9+/=]{16,}"(?:,"[A-Za-z0-9+/=]{16,}")+)\]').allMatches(keyWindow).toList();
+    String webKey = '';
+    for (var i = arrMatches.length - 1; i >= 0; i--) {
+      final inner = arrMatches[i].group(1);
+      if (inner == null) continue;
+      try {
+        final chunks = (jsonDecode('[$inner]') as List).map((e) => e.toString()).toList();
+        final decoded = chunks.map((c) => utf8.decode(base64Decode(c))).join();
+        if (RegExp(r'^[0-9a-fA-F]{24,64}$').hasMatch(decoded)) {
+          webKey = decoded;
+          break;
+        }
+      } catch (_) {
+        // Try next candidate
+      }
+    }
+    if (webKey.isEmpty) {
+      throw Exception('Invalid SolisCloud web portal handshake parameters.');
+    }
+
+    final verMatch = RegExp(r'Version:"([0-9.]+)"').firstMatch(bundleTxt);
+    final version = verMatch?.group(1) ?? '5.3.121';
+
+    _solisWebPrefix = prefix;
+    _solisWebKey = webKey;
+    _solisWebVersion = version;
+    _solisWebFetchedAtMs = now;
+    return (prefix: prefix, webKey: webKey, version: version);
+  }
+
+  static Future<({bool ok, int status, Map<String, dynamic>? json})> _solisWebPost({
+    required Map<String, String> sessionState,
+    required ({String prefix, String webKey, String version}) webCfg,
+    required String apiPath,
+    required Map<String, dynamic> bodyObj,
+  }) async {
+    final clean = <String, dynamic>{};
+    bodyObj.forEach((k, v) {
+      if (v != null && v != '') clean[k] = v;
+    });
+    clean['localTime'] = DateTime.now().millisecondsSinceEpoch;
+    clean['localTimeZone'] = 5.5;
+    clean['language'] = '2';
+
+    final bodyStr = jsonEncode(clean);
+    final contentMd5 = _md5Base64(bodyStr);
+    final gmtDate = _rfc1123Utc(DateTime.now().toUtc());
+    final canonical = 'POST\n$contentMd5\napplication/json\n$gmtDate\n$apiPath';
+    final sig = _hmacSha1Base64(webCfg.webKey, canonical);
+
+    final headers = <String, String>{
+      'User-Agent': _ua,
+      'Content-Type': 'application/json;charset=UTF-8',
+      'Content-MD5': contentMd5,
+      'Authorization': '${webCfg.prefix}$sig',
+      'Time': gmtDate,
+      'X-Cloud-Platform': 'GLY',
+      'language': '2',
+      'Device-Id': sessionState['deviceId'] ?? '',
+      'Version': webCfg.version,
+      'platform': 'Web',
+      'Origin': 'https://www.soliscloud.com',
+      'Referer': 'https://www.soliscloud.com/overview/plantStation',
+    };
+    final cookie = sessionState['cookie'] ?? '';
+    if (cookie.isNotEmpty) headers['Cookie'] = cookie;
+    final token = sessionState['token'] ?? '';
+    if (token.isNotEmpty) headers['token'] = token;
+
+    final resp = await http
+        .post(
+          Uri.parse('https://www.soliscloud.com/api$apiPath'),
+          headers: headers,
+          body: bodyStr,
+        )
+        .timeout(const Duration(seconds: 20));
+
+    final hdrTok = (resp.headers['token'] ??
+            resp.headers['csrftoken'] ??
+            resp.headers['x-token'] ??
+            '')
+        .trim();
+    if (hdrTok.isNotEmpty && (sessionState['token'] ?? '').isEmpty) {
+      sessionState['token'] = hdrTok;
+    }
+
+    final setCookie = resp.headers['set-cookie'];
+    if (setCookie != null && setCookie.isNotEmpty) {
+      sessionState['cookie'] = _mergeCookies(sessionState['cookie'] ?? '', setCookie);
+      if ((sessionState['token'] ?? '').isEmpty) {
+        final ckTok = _cookieValue(sessionState['cookie'] ?? '', ['token', 'csrfToken', 'X-Token']);
+        if (ckTok.isNotEmpty) sessionState['token'] = ckTok;
+      }
+    }
+
+    return (
+      ok: resp.statusCode >= 200 && resp.statusCode < 300,
+      status: resp.statusCode,
+      json: _tryJsonMap(resp.body),
+    );
+  }
+
+  static Future<({bool ok, int status, Map<String, dynamic>? json})> _safeSolisWebPost({
+    required Map<String, String> sessionState,
+    required ({String prefix, String webKey, String version}) webCfg,
+    required String apiPath,
+    required Map<String, dynamic> bodyObj,
+  }) async {
+    try {
+      return await _solisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: apiPath,
+        bodyObj: bodyObj,
+      );
+    } catch (_) {
+      return (ok: false, status: 0, json: null);
+    }
+  }
+
+  static List<Map<String, dynamic>> _extractSolisRecords(dynamic payload) {
+    if (payload == null) return const [];
+    if (payload is List) return _asListOfMaps(payload);
+    final root = _asMap(payload);
+    if (root == null) return const [];
+    for (final k in const ['records', 'list']) {
+      if (root[k] is List) return _asListOfMaps(root[k]);
+    }
+    for (final container in const ['page', 'inverterPage', 'stationPage']) {
+      final sub = _asMap(root[container]);
+      if (sub != null) {
+        if (sub['records'] is List) return _asListOfMaps(sub['records']);
+        if (sub['list'] is List) return _asListOfMaps(sub['list']);
+      }
+    }
+    return const [];
+  }
+
+  static InverterSnapshot _buildSolisSnapshot({
+    required Map<String, dynamic> data,
+    required String authMode,
+    required String matchedInvSn,
+    required String matchedLogSn,
+    required String stationId,
+    required bool? loggerOnline,
+    required int? loggerSignalPct,
+    required List<InverterDailyLog> dailyLogs,
+  }) {
+    final pacRaw = _pickNum(data, ['pac', 'power', 'currentPower']) ?? 0.0;
+    final pacUnit = _pickStr(data, ['pacStr', 'powerStr']);
+    final liveKw = (_toKwSmart(pacRaw, pacUnit.isEmpty ? 'kw' : pacUnit) ?? 0.0);
+    final todayKwh = _pickNum(data, ['eToday', 'dayEnergy', 'dayEnergy1']) ?? 0.0;
+    final monthKwh = _pickNum(data, ['eMonth', 'monthEnergy', 'monthEnergy1']) ?? 0.0;
+    final totalKwh = _pickNum(data, ['eTotal', 'allEnergy', 'allEnergy1']) ?? 0.0;
+
+    final capRaw = _pickNum(data, ['capacity', 'power', 'dcInputPower']);
+    final capUnit = _pickStr(data, ['capacityStr', 'powerStr']);
+    final ratedKw = capRaw != null
+        ? (_toKwSmart(capRaw, capUnit.isNotEmpty ? capUnit : (capRaw > 500 ? 'w' : 'kw')) ?? 0.0)
+        : 0.0;
+
+    final stateNum = _pickNum(data, ['state', 'inverterState'])?.round();
+    final plantStatus = stateNum == 1
+        ? 'online'
+        : stateNum == 2
+            ? 'offline'
+            : stateNum == 3
+                ? 'fault'
+                : stateNum == 4
+                    ? 'standby'
+                    : (liveKw > 0 ? 'online' : 'offline');
+
+    final loggerStatus = loggerOnline == true
+        ? 'online'
+        : loggerOnline == false
+            ? 'offline'
+            : (plantStatus == 'online' ? 'online' : 'unknown');
+
+    final statusTag = (plantStatus == 'offline' && loggerOnline == true)
+        ? 'Plant Offline (No Sun) · Logger Online'
+        : (plantStatus == 'offline' ? 'Plant Offline / Standby' : 'Live');
+    final sigStr = loggerSignalPct != null ? ' · Signal $loggerSignalPct%' : '';
+    final idTag = matchedInvSn.isNotEmpty
+        ? matchedInvSn
+        : (matchedLogSn.isNotEmpty ? matchedLogSn : (stationId.isNotEmpty ? stationId : 'Synced'));
+
+    return InverterSnapshot(
+      brand: 'soliscloud',
+      authMode: authMode,
+      plantName: _pickStr(data, ['stationName', 'sno']).isNotEmpty
+          ? _pickStr(data, ['stationName', 'sno'])
+          : 'SolisCloud Plant',
+      plantStatus: plantStatus,
+      loggerStatus: loggerStatus,
+      currentKw: _round2(liveKw < 0 ? 0.0 : liveKw),
+      todayKwh: _round2(todayKwh < 0 ? 0.0 : todayKwh),
+      monthKwh: _round2(monthKwh < 0 ? 0.0 : monthKwh),
+      totalKwh: _round2(totalKwh < 0 ? 0.0 : totalKwh),
+      ratedKw: _round2(ratedKw < 0 ? 0.0 : ratedKw),
+      gridVoltageV: _pickNum(data, ['uAc1']),
+      inverterTempC: _pickNum(data, ['inverterTemperature', 'temperature']),
+      batterySocPct: _pickNum(data, ['batteryCapacitySoc']),
+      dailyLogs: dailyLogs,
+      syncedAt: DateTime.now().millisecondsSinceEpoch,
+      note: 'SolisCloud $statusTag · $idTag$sigStr',
+    );
+  }
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncSolisCloudWebDirect(
+    InverterConfig config,
+    String password,
+  ) async {
+    final user = config.username.trim();
+    final pass = password.trim();
+    if (user.isEmpty || pass.isEmpty) {
+      return (
+        ok: false,
+        snapshot: null,
+        error: 'Enter your SolisCloud email/username and password.',
+      );
+    }
+
+    var webCfg = await _getSolisWebConfig();
+    final nowUs = DateTime.now().microsecondsSinceEpoch;
+    final sessionState = <String, String>{
+      'deviceId': '${_md5Hex('$nowUs-solis-a')}${_md5Hex('${nowUs + 7}-solis-b')}',
+      'cookie': '',
+      'token': '',
+    };
+
+    final md5Pwd = _md5Hex(pass);
+    var loginRes = await _solisWebPost(
+      sessionState: sessionState,
+      webCfg: webCfg,
+      apiPath: '/user/login2',
+      bodyObj: {'userInfo': user, 'passWord': md5Pwd, 'yingZhenType': 1},
+    );
+
+    if (loginRes.status == 401 || loginRes.status == 403 || loginRes.json == null) {
+      webCfg = await _getSolisWebConfig(forceRefresh: true);
+      loginRes = await _solisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/user/login2',
+        bodyObj: {'userInfo': user, 'passWord': md5Pwd, 'yingZhenType': 1},
+      );
+    }
+
+    final loginCode = _str(loginRes.json?['code']);
+    if (!loginRes.ok || loginCode != '0') {
+      final serverMsg = _str(loginRes.json?['msg']);
+      if (loginCode == '3' || loginCode == '4' || loginCode == '5') {
+        return (
+          ok: false,
+          snapshot: null,
+          error:
+              'SolisCloud requested an account verification code (${serverMsg.isEmpty ? '2-step verification' : serverMsg}). Sign in once on www.soliscloud.com to trust your account, or use API Integration.',
+        );
+      }
+      return (
+        ok: false,
+        snapshot: null,
+        error: serverMsg.isNotEmpty
+            ? 'SolisCloud login failed: $serverMsg'
+            : 'SolisCloud login failed (HTTP ${loginRes.status}). Check your www.soliscloud.com email and password.',
+      );
+    }
+
+    final loginData = _asMap(loginRes.json?['data']);
+    final csrfTok = _pickStr(loginRes.json, ['csrfToken', 'token']).isNotEmpty
+        ? _pickStr(loginRes.json, ['csrfToken', 'token'])
+        : (_pickStr(loginData, ['csrfToken', 'token', 'accessToken']).isNotEmpty
+            ? _pickStr(loginData, ['csrfToken', 'token', 'accessToken'])
+            : _cookieValue(sessionState['cookie'] ?? '', ['token', 'csrfToken', 'X-Token']));
+    if (csrfTok.isNotEmpty) {
+      sessionState['token'] = csrfTok;
+    }
+
+    final stIdParam = config.stationId.trim();
+    final invSnParam = config.inverterSerial.trim();
+    final logSnParam = config.loggerSerial.trim();
+
+    final listResults = await Future.wait([
+      _safeSolisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/station/list',
+        bodyObj: {'pageNo': 1, 'pageSize': 30, 'stationType': '0'},
+      ),
+      _safeSolisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/inverter/listV2',
+        bodyObj: {
+          'pageNo': 1,
+          'pageSize': 30,
+          'stationType': '0',
+          if (stIdParam.isNotEmpty) 'stationId': stIdParam,
+        },
+      ),
+      _safeSolisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/collector/listV2',
+        bodyObj: {
+          'pageNo': 1,
+          'pageSize': 30,
+          if (stIdParam.isNotEmpty) 'stationId': stIdParam,
+        },
+      ),
+    ]);
+
+    final stationRes = listResults[0];
+    final invListRes = listResults[1];
+    final collectorRes = listResults[2];
+
+    var stationRecords = _extractSolisRecords(stationRes.json?['data']);
+    var invRecords = _extractSolisRecords(invListRes.json?['data']);
+    var collectorRecords = _extractSolisRecords(collectorRes.json?['data']);
+
+    if (stationRecords.isEmpty) {
+      final stFallback = await _safeSolisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/station/list',
+        bodyObj: {'pageNo': 1, 'pageSize': 30},
+      );
+      stationRecords = _extractSolisRecords(stFallback.json?['data']);
+    }
+    if (stationRecords.isEmpty) {
+      final stV2 = await _safeSolisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/station/listV2',
+        bodyObj: {'pageNo': 1, 'pageSize': 30},
+      );
+      stationRecords = _extractSolisRecords(stV2.json?['data']);
+    }
+
+    if (invRecords.isEmpty && stationRecords.isNotEmpty) {
+      for (final st in stationRecords.take(5)) {
+        final sid = _pickStr(st, ['id', 'stationId']);
+        if (sid.isEmpty) continue;
+        final stInv = await _safeSolisWebPost(
+          sessionState: sessionState,
+          webCfg: webCfg,
+          apiPath: '/inverter/listV2',
+          bodyObj: {'pageNo': 1, 'pageSize': 20, 'stationId': sid},
+        );
+        final recs = _extractSolisRecords(stInv.json?['data']);
+        if (recs.isNotEmpty) invRecords = [...invRecords, ...recs];
+      }
+    }
+
+    if (invRecords.isEmpty && stationRecords.isEmpty && collectorRecords.isEmpty) {
+      final apiErr = _pickStr(invListRes.json, ['msg', 'message']).isNotEmpty
+          ? _pickStr(invListRes.json, ['msg', 'message'])
+          : (_pickStr(stationRes.json, ['msg', 'message']).isNotEmpty
+              ? _pickStr(stationRes.json, ['msg', 'message'])
+              : _pickStr(collectorRes.json, ['msg', 'message']));
+      return (
+        ok: false,
+        snapshot: null,
+        error: apiErr.isNotEmpty
+            ? 'Signed in to www.soliscloud.com, but SolisCloud returned: $apiErr'
+            : 'Signed in to www.soliscloud.com, but no plant or inverter was found on this account.',
+      );
+    }
+
+    Map<String, dynamic>? matchedInv;
+    for (final rec in invRecords) {
+      final sn = _pickStr(rec, ['sn', 'inverterSn']);
+      final col = _pickStr(rec, ['collectorSn', 'collectorsn', 'dataloggerSn']);
+      if ((invSnParam.isNotEmpty && _serialsMatch(invSnParam, sn)) ||
+          (logSnParam.isNotEmpty && _serialsMatch(logSnParam, col)) ||
+          (stIdParam.isNotEmpty && _pickStr(rec, ['stationId']) == stIdParam)) {
+        matchedInv = rec;
+        break;
+      }
+    }
+
+    Map<String, dynamic>? matchedCol;
+    if (logSnParam.isNotEmpty) {
+      for (final c in collectorRecords) {
+        if (_serialsMatch(logSnParam, _pickStr(c, ['sn', 'collectorSn']))) {
+          matchedCol = c;
+          break;
+        }
+      }
+    }
+
+    Map<String, dynamic>? matchedStation;
+    final targetStId = _pickStr(matchedInv, ['stationId']).isNotEmpty
+        ? _pickStr(matchedInv, ['stationId'])
+        : (_pickStr(matchedCol, ['stationId']).isNotEmpty
+            ? _pickStr(matchedCol, ['stationId'])
+            : stIdParam);
+    if (targetStId.isNotEmpty) {
+      for (final st in stationRecords) {
+        if (_pickStr(st, ['id', 'stationId']) == targetStId) {
+          matchedStation = st;
+          break;
+        }
+      }
+    }
+    matchedStation ??= stationRecords.isNotEmpty ? stationRecords.first : null;
+    final chosenInv = matchedInv ?? (invRecords.isNotEmpty ? invRecords.first : null);
+
+    var inverterData = <String, dynamic>{
+      if (matchedStation != null) ...matchedStation,
+      if (chosenInv != null) ...chosenInv,
+    };
+
+    final invId = _pickStr(chosenInv, ['id', 'inverterId']).isNotEmpty
+        ? _pickStr(chosenInv, ['id', 'inverterId'])
+        : _pickStr(matchedStation, ['inverterId']);
+    var matchedInvSn = _pickStr(chosenInv, ['sn', 'inverterSn']).isNotEmpty
+        ? _pickStr(chosenInv, ['sn', 'inverterSn'])
+        : (_pickStr(matchedStation, ['inverterSn']).isNotEmpty
+            ? _pickStr(matchedStation, ['inverterSn'])
+            : invSnParam);
+    var matchedLogSn = _pickStr(chosenInv, ['collectorSn', 'collectorsn', 'dataloggerSn']).isNotEmpty
+        ? _pickStr(chosenInv, ['collectorSn', 'collectorsn', 'dataloggerSn'])
+        : (_pickStr(matchedCol, ['sn', 'collectorSn']).isNotEmpty
+            ? _pickStr(matchedCol, ['sn', 'collectorSn'])
+            : logSnParam);
+    var chosenStationId = _pickStr(chosenInv, ['stationId']).isNotEmpty
+        ? _pickStr(chosenInv, ['stationId'])
+        : (_pickStr(matchedCol, ['stationId']).isNotEmpty
+            ? _pickStr(matchedCol, ['stationId'])
+            : (_pickStr(matchedStation, ['id', 'stationId']).isNotEmpty
+                ? _pickStr(matchedStation, ['id', 'stationId'])
+                : stIdParam));
+
+    if (invId.isNotEmpty || matchedInvSn.isNotEmpty) {
+      final detRes = await _safeSolisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/inverter/detail',
+        bodyObj: {
+          if (invId.isNotEmpty) 'id': invId,
+          if (matchedInvSn.isNotEmpty) 'sn': matchedInvSn,
+        },
+      );
+      final detData = _asMap(detRes.json?['data']);
+      if (detRes.ok && _str(detRes.json?['code']) == '0' && detData != null) {
+        inverterData = {...inverterData, ...detData};
+        if (_pickStr(detData, ['sn', 'inverterSn']).isNotEmpty) {
+          matchedInvSn = _pickStr(detData, ['sn', 'inverterSn']);
+        }
+        if (_pickStr(detData, ['collectorSn', 'collectorsn']).isNotEmpty) {
+          matchedLogSn = _pickStr(detData, ['collectorSn', 'collectorsn']);
+        }
+        if (_pickStr(detData, ['stationId']).isNotEmpty) {
+          chosenStationId = _pickStr(detData, ['stationId']);
+        }
+      }
+    }
+
+    if (chosenStationId.isNotEmpty) {
+      final stDet = await _safeSolisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/station/detailMix',
+        bodyObj: {'id': chosenStationId, 'needCheckSingleInverter': false},
+      );
+      final stData = _asMap(stDet.json?['data']);
+      if (stDet.ok && _str(stDet.json?['code']) == '0' && stData != null) {
+        inverterData = {...stData, ...inverterData};
+      }
+    }
+
+    if (collectorRecords.isEmpty && chosenStationId.isNotEmpty) {
+      final colRes = await _safeSolisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/collector/listV2',
+        bodyObj: {'pageNo': 1, 'pageSize': 20, 'stationId': chosenStationId},
+      );
+      collectorRecords = _extractSolisRecords(colRes.json?['data']);
+    }
+
+    Map<String, dynamic>? colMatch = matchedCol;
+    if (colMatch == null && collectorRecords.isNotEmpty) {
+      for (final c in collectorRecords) {
+        if (_serialsMatch(matchedLogSn.isNotEmpty ? matchedLogSn : logSnParam, _pickStr(c, ['sn']))) {
+          colMatch = c;
+          break;
+        }
+      }
+      colMatch ??= collectorRecords.first;
+    }
+
+    bool? loggerOnline;
+    int? loggerSignalPct;
+    if (colMatch != null) {
+      if (_pickStr(colMatch, ['sn', 'collectorSn']).isNotEmpty) {
+        matchedLogSn = _pickStr(colMatch, ['sn', 'collectorSn']);
+      }
+      final rssi = _pickNum(colMatch, ['rssi', 'rssiLevel', 'signal']);
+      if (rssi != null) {
+        loggerSignalPct = rssi < 0
+            ? ((rssi + 100.0) * 2.0).round().clamp(0, 100).toInt()
+            : rssi.round().clamp(0, 100).toInt();
+      }
+      final cState = _pickNum(colMatch, ['state'])?.round();
+      if (cState != null) loggerOnline = cState == 1;
+    }
+
+    final dailyLogs = <InverterDailyLog>[];
+    if (invId.isNotEmpty || matchedInvSn.isNotEmpty) {
+      final mRes = await _safeSolisWebPost(
+        sessionState: sessionState,
+        webCfg: webCfg,
+        apiPath: '/chart/inverter/month',
+        bodyObj: {
+          if (invId.isNotEmpty) 'id': invId,
+          if (matchedInvSn.isNotEmpty) 'sn': matchedInvSn,
+          'month': _istYearMonth(),
+          'money': 'INR',
+        },
+      );
+      final rawData = mRes.json?['data'];
+      final days = rawData is List
+          ? _asListOfMaps(rawData)
+          : _asListOfMaps(_asMap(rawData)?['list']);
+      for (final row in days) {
+        final dk = _sanitizeDateKey(_pickStr(row, ['dateStr', 'date', 'time']));
+        final gen = _pickNum(row, ['energy', 'eToday', 'value']);
+        if (dk.isNotEmpty && gen != null && gen >= 0) {
+          dailyLogs.add(InverterDailyLog(date: dk, kwh: _round2(gen)));
+        }
+      }
+    }
+
+    return (
+      ok: true,
+      snapshot: _buildSolisSnapshot(
+        data: inverterData,
+        authMode: 'website',
+        matchedInvSn: matchedInvSn,
+        matchedLogSn: matchedLogSn,
+        stationId: chosenStationId,
+        loggerOnline: loggerOnline,
+        loggerSignalPct: loggerSignalPct,
+        dailyLogs: dailyLogs,
+      ),
+      error: null,
+    );
+  }
+
+  static Future<({bool ok, int status, Map<String, dynamic>? json})> _solisApiPost({
+    required String apiPath,
+    required Map<String, dynamic> bodyObj,
+    required String keyId,
+    required String keySecret,
+    String apiBase = 'https://www.soliscloud.com:13333',
+  }) async {
+    final reqBodyStr = jsonEncode(bodyObj);
+    final contentMd5 = _md5Base64(reqBodyStr);
+    final gmtDate = _rfc1123Utc(DateTime.now().toUtc());
+    final canonical = 'POST\n$contentMd5\napplication/json\n$gmtDate\n$apiPath';
+    final sig = _hmacSha1Base64(keySecret, canonical);
+
+    final resp = await http
+        .post(
+          Uri.parse('$apiBase$apiPath'),
+          headers: {
+            'User-Agent': _ua,
+            'Content-Type': 'application/json;charset=UTF-8',
+            'Content-MD5': contentMd5,
+            'Date': gmtDate,
+            'Authorization': 'API $keyId:$sig',
+          },
+          body: reqBodyStr,
+        )
+        .timeout(const Duration(seconds: 20));
+    return (
+      ok: resp.statusCode >= 200 && resp.statusCode < 300,
+      status: resp.statusCode,
+      json: _tryJsonMap(resp.body),
+    );
+  }
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncSolisCloudApiDirect(
+    InverterConfig config,
+    String keyId,
+    String keySecret, {
+    String apiBase = 'https://www.soliscloud.com:13333',
+  }) async {
+    final stIdParam = config.stationId.trim();
+    final invSnParam = config.inverterSerial.trim();
+    final logSnParam = config.loggerSerial.trim();
+
+    Map<String, dynamic>? inverterData;
+    var matchedInvSn = invSnParam;
+    var matchedLogSn = logSnParam;
+    var chosenStationId = stIdParam;
+
+    if (invSnParam.isNotEmpty) {
+      final det = await _solisApiPost(
+        apiPath: '/v1/api/inverterDetail',
+        bodyObj: {'sn': invSnParam},
+        keyId: keyId,
+        keySecret: keySecret,
+        apiBase: apiBase,
+      );
+      final detData = _asMap(det.json?['data']);
+      if (det.ok && det.json?['success'] == true && detData != null) {
+        inverterData = detData;
+        if (_pickStr(detData, ['sn']).isNotEmpty) matchedInvSn = _pickStr(detData, ['sn']);
+        if (_pickStr(detData, ['collectorSn', 'collectorsn']).isNotEmpty) {
+          matchedLogSn = _pickStr(detData, ['collectorSn', 'collectorsn']);
+        }
+        if (_pickStr(detData, ['stationId']).isNotEmpty) {
+          chosenStationId = _pickStr(detData, ['stationId']);
+        }
+      }
+    }
+
+    if (inverterData == null) {
+      final listRes = await _solisApiPost(
+        apiPath: '/v1/api/inverterDetailList',
+        bodyObj: {
+          'pageNo': 1,
+          'pageSize': 20,
+          if (stIdParam.isNotEmpty) 'stationId': stIdParam,
+        },
+        keyId: keyId,
+        keySecret: keySecret,
+        apiBase: apiBase,
+      );
+      if (!listRes.ok || listRes.json?['success'] == false) {
+        final msg = _str(listRes.json?['msg']);
+        return (
+          ok: false,
+          snapshot: null,
+          error:
+              'SolisCloud API authentication failed: ${msg.isNotEmpty ? msg : 'HTTP ${listRes.status}'}. Check your KeyID and KeySecret.',
+        );
+      }
+      final records = _extractSolisRecords(listRes.json?['data']);
+      if (records.isEmpty) {
+        return (
+          ok: false,
+          snapshot: null,
+          error: 'Signed in to SolisCloud API, but no inverters were found on this account.',
+        );
+      }
+      Map<String, dynamic>? matched;
+      for (final rec in records) {
+        if ((invSnParam.isNotEmpty && _serialsMatch(invSnParam, _pickStr(rec, ['sn']))) ||
+            (logSnParam.isNotEmpty && _serialsMatch(logSnParam, _pickStr(rec, ['collectorSn'])))) {
+          matched = rec;
+          break;
+        }
+      }
+      inverterData = matched ?? records.first;
+      if (_pickStr(inverterData, ['sn']).isNotEmpty) matchedInvSn = _pickStr(inverterData, ['sn']);
+      if (_pickStr(inverterData, ['collectorSn']).isNotEmpty) {
+        matchedLogSn = _pickStr(inverterData, ['collectorSn']);
+      }
+      if (_pickStr(inverterData, ['stationId']).isNotEmpty) {
+        chosenStationId = _pickStr(inverterData, ['stationId']);
+      }
+    }
+
+    bool? loggerOnline;
+    int? loggerSignalPct;
+    if (matchedLogSn.isNotEmpty || chosenStationId.isNotEmpty) {
+      try {
+        final colRes = await _solisApiPost(
+          apiPath: '/v1/api/collectorList',
+          bodyObj: {
+            'pageNo': 1,
+            'pageSize': 20,
+            if (chosenStationId.isNotEmpty) 'stationId': chosenStationId,
+          },
+          keyId: keyId,
+          keySecret: keySecret,
+          apiBase: apiBase,
+        );
+        final cols = _extractSolisRecords(colRes.json?['data']);
+        Map<String, dynamic>? col;
+        for (final c in cols) {
+          if (_serialsMatch(matchedLogSn, _pickStr(c, ['sn']))) {
+            col = c;
+            break;
+          }
+        }
+        col ??= cols.isNotEmpty ? cols.first : null;
+        if (col != null) {
+          if (_pickStr(col, ['sn']).isNotEmpty) matchedLogSn = _pickStr(col, ['sn']);
+          final rssi = _pickNum(col, ['rssi', 'rssiLevel']);
+          if (rssi != null) {
+            loggerSignalPct = rssi < 0
+                ? ((rssi + 100.0) * 2.0).round().clamp(0, 100).toInt()
+                : rssi.round().clamp(0, 100).toInt();
+          }
+          final cState = _pickNum(col, ['state'])?.round();
+          if (cState != null) loggerOnline = cState == 1;
+        }
+      } catch (_) {
+        // Optional logger diagnostics
+      }
+    }
+
+    final dailyLogs = <InverterDailyLog>[];
+    if (matchedInvSn.isNotEmpty) {
+      try {
+        final mRes = await _solisApiPost(
+          apiPath: '/v1/api/inverterMonth',
+          bodyObj: {'sn': matchedInvSn, 'month': _istYearMonth(), 'money': 'INR'},
+          keyId: keyId,
+          keySecret: keySecret,
+          apiBase: apiBase,
+        );
+        final days = _asListOfMaps(mRes.json?['data']);
+        for (final row in days) {
+          final dk = _sanitizeDateKey(_pickStr(row, ['dateStr', 'date']));
+          final gen = _pickNum(row, ['energy', 'eToday']);
+          if (dk.isNotEmpty && gen != null && gen >= 0) {
+            dailyLogs.add(InverterDailyLog(date: dk, kwh: _round2(gen)));
+          }
+        }
+      } catch (_) {
+        // Optional history
+      }
+    }
+
+    return (
+      ok: true,
+      snapshot: _buildSolisSnapshot(
+        data: inverterData,
+        authMode: 'api',
+        matchedInvSn: matchedInvSn,
+        matchedLogSn: matchedLogSn,
+        stationId: chosenStationId,
+        loggerOnline: loggerOnline,
+        loggerSignalPct: loggerSignalPct,
+        dailyLogs: dailyLogs,
+      ),
+      error: null,
+    );
+  }
+
+  // ==================== 2. GOODWE SEMS PORTAL ====================
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncGoodWeDirect(
+    InverterConfig config,
+    String password,
+  ) async {
+    final user = config.username.trim();
+    if (user.isEmpty || password.isEmpty) {
+      return (ok: false, snapshot: null, error: 'Enter your GoodWe SEMS Portal email and password.');
+    }
+
+    final initToken = base64Encode(utf8.encode(jsonEncode({
+      'uid': '',
+      'timestamp': 0,
+      'token': '',
+      'client': 'web',
+      'version': '',
+      'language': 'en',
+    })));
+
+    const loginUrls = [
+      'https://www.semsportal.com/api/v2/Common/CrossLogin',
+      'https://eu.semsportal.com/api/v2/Common/CrossLogin',
+      'https://au.semsportal.com/api/v2/Common/CrossLogin',
+    ];
+
+    var authTokenHeader = '';
+    var apiBase = 'https://www.semsportal.com/api/';
+    var lastErr = 'GoodWe SEMS login failed. Check your SEMS Portal email and password.';
+
+    for (final url in loginUrls) {
+      try {
+        final resp = await http
+            .post(
+              Uri.parse(url),
+              headers: {
+                'User-Agent': _ua,
+                'Content-Type': 'application/json',
+                'Token': initToken,
+              },
+              body: jsonEncode({'account': user, 'pwd': password}),
+            )
+            .timeout(const Duration(seconds: 15));
+        final j = _tryJsonMap(resp.body);
+        final data = _asMap(j?['data']);
+        if (resp.statusCode == 200 && j != null && j['hasError'] != true && data != null && _str(data['token']).isNotEmpty) {
+          authTokenHeader = base64Encode(utf8.encode(jsonEncode(data)));
+          final api = _str(j['api']);
+          if (api.startsWith('https://')) {
+            apiBase = api.endsWith('/') ? api : '$api/';
+          }
+          break;
+        }
+        if (j != null && _str(j['msg']).isNotEmpty) {
+          lastErr = 'GoodWe SEMS: ${_str(j['msg'])}';
+        }
+      } catch (_) {
+        // Try next region
+      }
+    }
+
+    if (authTokenHeader.isEmpty) {
+      return (ok: false, snapshot: null, error: lastErr);
+    }
+
+    var stationIds = <String>[];
+    if (config.stationId.trim().isNotEmpty) {
+      stationIds.add(config.stationId.trim());
+    } else {
+      final listPaths = <(String, Map<String, dynamic>)>[
+        ('v2/HistoryData/QueryPowerStationByHistory', <String, dynamic>{}),
+        ('v3/PowerStation/GetPowerStationList', <String, dynamic>{'page_index': 1, 'page_size': 20}),
+        ('v1/PowerStation/GetPowerStationList', <String, dynamic>{'page_index': 1, 'page_size': 20}),
+      ];
+      for (final entry in listPaths) {
+        try {
+          final r = await http
+              .post(
+                Uri.parse('$apiBase${entry.$1}'),
+                headers: {
+                  'User-Agent': _ua,
+                  'Content-Type': 'application/json',
+                  'Token': authTokenHeader,
+                },
+                body: jsonEncode(entry.$2),
+              )
+              .timeout(const Duration(seconds: 15));
+          final j = _tryJsonMap(r.body);
+          final d = j?['data'];
+          final rawArr = d is List
+              ? _asListOfMaps(d)
+              : (_asListOfMaps(_asMap(d)?['list']).isNotEmpty
+                  ? _asListOfMaps(_asMap(d)?['list'])
+                  : _asListOfMaps(_asMap(d)?['data']));
+          for (final item in rawArr) {
+            final id = _pickStr(item, ['id', 'powerstation_id', 'stationId']);
+            if (id.isNotEmpty) stationIds.add(id);
+          }
+          if (stationIds.isNotEmpty) break;
+        } catch (_) {
+          // Try next path
+        }
+      }
+    }
+
+    if (stationIds.isEmpty) {
+      return (
+        ok: false,
+        snapshot: null,
+        error: 'Signed in to GoodWe SEMS, but no power stations were found under this account.',
+      );
+    }
+
+    Map<String, dynamic>? chosenDetail;
+    var chosenPsId = stationIds.first;
+    for (final psId in stationIds.take(5)) {
+      try {
+        final r = await http
+            .post(
+              Uri.parse('${apiBase}v2/PowerStation/GetMonitorDetailByPowerstationId'),
+              headers: {
+                'User-Agent': _ua,
+                'Content-Type': 'application/json',
+                'Token': authTokenHeader,
+              },
+              body: jsonEncode({'powerStationId': psId}),
+            )
+            .timeout(const Duration(seconds: 15));
+        final j = _tryJsonMap(r.body);
+        final d = _asMap(j?['data']);
+        if (r.statusCode == 200 && j != null && j['hasError'] != true && d != null) {
+          chosenPsId = psId;
+          chosenDetail = d;
+          if (config.inverterSerial.trim().isEmpty && config.loggerSerial.trim().isEmpty) break;
+          final invs = _asListOfMaps(d['inverter']);
+          final matched = invs.any((inv) {
+            final full = _asMap(inv['invert_full']);
+            final sn = _pickStr(inv, ['sn']).isNotEmpty ? _pickStr(inv, ['sn']) : _pickStr(full, ['sn']);
+            return _serialsMatch(config.inverterSerial, sn) || _serialsMatch(config.loggerSerial, sn);
+          });
+          if (matched) break;
+        }
+      } catch (_) {
+        // Try next station
+      }
+    }
+
+    if (chosenDetail == null) {
+      return (
+        ok: false,
+        snapshot: null,
+        error: 'Signed in to GoodWe SEMS, but could not load plant monitor telemetry.',
+      );
+    }
+
+    final info = _asMap(chosenDetail['info']) ?? const <String, dynamic>{};
+    final kpi = _asMap(chosenDetail['kpi']) ?? const <String, dynamic>{};
+    final pf = _asMap(chosenDetail['powerflow']) ?? const <String, dynamic>{};
+    final energe = _asMap(chosenDetail['energeStatisticsTotals']) ?? const <String, dynamic>{};
+    final invs = _asListOfMaps(chosenDetail['inverter']);
+    final activeInv = invs.isNotEmpty ? invs.first : const <String, dynamic>{};
+    final invFull = _asMap(activeInv['invert_full']) ?? const <String, dynamic>{};
+
+    final liveKw = _toKwSmart(_pickNum(kpi, ['pac']), 'w') ??
+        _toKwSmart(_pickNum(pf, ['pv']), 'w') ??
+        _toKwSmart(_pickNum(invFull, ['pac', 'output_power']), 'w') ??
+        0.0;
+    final todayKwh = _pickNum(kpi, ['power']) ??
+        _pickNum(energe, ['etoday', 'generation']) ??
+        _pickNum(invFull, ['eday']) ??
+        0.0;
+    final monthKwh = _pickNum(kpi, ['month_generation']) ?? _pickNum(invFull, ['emonth']) ?? 0.0;
+    final totalKwh = _pickNum(kpi, ['total_power']) ??
+        _pickNum(energe, ['etotal']) ??
+        _pickNum(invFull, ['etotal']) ??
+        0.0;
+    final ratedKw = _pickNum(info, ['capacity']) ?? 0.0;
+
+    final rawStatus = _pickNum(invFull, ['status'])?.round() ?? _pickNum(activeInv, ['status'])?.round();
+    final plantStatus = rawStatus == 1
+        ? 'online'
+        : rawStatus == 0
+            ? 'standby'
+            : rawStatus == 2
+                ? 'fault'
+                : rawStatus == -1
+                    ? 'offline'
+                    : (liveKw > 0 ? 'online' : 'standby');
+
+    return (
+      ok: true,
+      snapshot: InverterSnapshot(
+        brand: 'goodwe',
+        authMode: config.authMode,
+        plantName: _pickStr(info, ['stationname', 'name']).isNotEmpty
+            ? _pickStr(info, ['stationname', 'name'])
+            : 'GoodWe Solar Plant',
+        plantStatus: plantStatus,
+        loggerStatus: plantStatus == 'offline' ? 'offline' : 'online',
+        currentKw: _round2(liveKw < 0 ? 0.0 : liveKw),
+        todayKwh: _round2(todayKwh < 0 ? 0.0 : todayKwh),
+        monthKwh: _round2(monthKwh < 0 ? 0.0 : monthKwh),
+        totalKwh: _round2(totalKwh < 0 ? 0.0 : totalKwh),
+        ratedKw: _round2(ratedKw < 0 ? 0.0 : ratedKw),
+        gridVoltageV: _pickNum(invFull, ['vac1', 'vgrid1']),
+        inverterTempC: _pickNum(invFull, ['tempperature', 'temperature']),
+        batterySocPct: _pickNum(pf, ['soc']) ?? _pickNum(invFull, ['cbattery1', 'battery_soc']),
+        dailyLogs: const [],
+        syncedAt: DateTime.now().millisecondsSinceEpoch,
+        note: 'GoodWe SEMS · ${_pickStr(invFull, ['sn']).isNotEmpty ? _pickStr(invFull, ['sn']) : chosenPsId}',
+      ),
+      error: null,
+    );
+  }
+
+  // ==================== 3. GROWATT SHINESERVER ====================
+
+  static String _growattMd5(String password, bool modified) {
+    final digest = _md5Hex(password);
+    if (!modified) return digest;
+    final sb = StringBuffer();
+    for (var i = 0; i < digest.length; i += 2) {
+      final first = digest[i] == '0' ? 'c' : digest[i];
+      sb.write(first);
+      if (i + 1 < digest.length) sb.write(digest[i + 1]);
+    }
+    return sb.toString();
+  }
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncGrowattDirect(
+    InverterConfig config,
+    String password,
+  ) async {
+    final user = config.username.trim();
+    if (user.isEmpty || password.isEmpty) {
+      return (ok: false, snapshot: null, error: 'Enter your Growatt ShineServer username and password.');
+    }
+
+    const bases = ['https://server.growatt.com', 'https://server-us.growatt.com'];
+    var activeBase = bases.first;
+    var cookieJar = '';
+    var loggedIn = false;
+    var plantItems = <Map<String, dynamic>>[];
+    var lastErr = 'Growatt ShineServer login failed. Check your ShinePhone/ShineServer username and password.';
+
+    for (final base in bases) {
+      for (final modified in const [true, false]) {
+        try {
+          final resp = await http
+              .post(
+                Uri.parse('$base/newTwoLoginAPI.do'),
+                headers: const {
+                  'User-Agent': _ua,
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: {
+                  'userName': user,
+                  'password': _growattMd5(password, modified),
+                },
+              )
+              .timeout(const Duration(seconds: 15));
+          final j = _tryJsonMap(resp.body);
+          final back = _asMap(j?['back']);
+          if (resp.statusCode == 200 && back != null && back['success'] == true) {
+            activeBase = base;
+            cookieJar = _mergeCookies('', resp.headers['set-cookie']);
+            loggedIn = true;
+            plantItems = _asListOfMaps(back['data']);
+            break;
+          }
+          if (back != null && _str(back['msg']).isNotEmpty) {
+            lastErr = 'Growatt ShineServer: ${_str(back['msg'])}';
+          }
+        } catch (_) {
+          // Try next variant
+        }
+      }
+      if (loggedIn) break;
+    }
+
+    if (!loggedIn) {
+      return (ok: false, snapshot: null, error: lastErr);
+    }
+
+    if (plantItems.isEmpty) {
+      try {
+        final plResp = await http
+            .get(
+              Uri.parse('$activeBase/PlantListAPI.do'),
+              headers: {'User-Agent': _ua, 'Cookie': cookieJar},
+            )
+            .timeout(const Duration(seconds: 15));
+        cookieJar = _mergeCookies(cookieJar, plResp.headers['set-cookie']);
+        final plJson = _tryJsonMap(plResp.body);
+        plantItems = _asListOfMaps(_asMap(plJson?['back'])?['data']);
+      } catch (_) {
+        // Ignore
+      }
+    }
+
+    final plantIds = config.stationId.trim().isNotEmpty
+        ? [config.stationId.trim()]
+        : plantItems
+            .map((p) => _pickStr(p, ['plantId', 'id']))
+            .where((id) => id.isNotEmpty)
+            .take(6)
+            .toList();
+
+    if (plantIds.isEmpty) {
+      return (
+        ok: false,
+        snapshot: null,
+        error: 'Signed in to Growatt ShineServer, but no plants were found under this account.',
+      );
+    }
+
+    var chosenPid = plantIds.first;
+    Map<String, dynamic> chosenDevice = const {};
+    Map<String, dynamic> chosenPlantData = const {};
+    var matchedInvSn = config.inverterSerial.trim();
+
+    for (final pid in plantIds) {
+      try {
+        final devResp = await http
+            .get(
+              Uri.parse(
+                '$activeBase/newPlantAPI.do?op=getAllDeviceList&plantId=${Uri.encodeQueryComponent(pid)}&pageNum=1&pageSize=20',
+              ),
+              headers: {'User-Agent': _ua, 'Cookie': cookieJar},
+            )
+            .timeout(const Duration(seconds: 15));
+        final devJson = _tryJsonMap(devResp.body);
+        final devs = _asListOfMaps(devJson?['deviceList']);
+        final pData = _asMap(devJson?['plantData']) ?? const <String, dynamic>{};
+        if (devs.isNotEmpty) {
+          chosenPid = pid;
+          chosenPlantData = pData;
+          chosenDevice = devs.first;
+          matchedInvSn = _pickStr(devs.first, ['deviceSn', 'sn', 'alias']);
+          var foundExact = false;
+          for (final dev in devs) {
+            final sn = _pickStr(dev, ['deviceSn', 'sn', 'alias']);
+            final logSn = _pickStr(dev, ['datalogSn', 'datalog_sn', 'loggerSn']);
+            if ((config.inverterSerial.trim().isNotEmpty && _serialsMatch(config.inverterSerial, sn)) ||
+                (config.loggerSerial.trim().isNotEmpty && _serialsMatch(config.loggerSerial, logSn))) {
+              chosenDevice = dev;
+              matchedInvSn = sn;
+              foundExact = true;
+              break;
+            }
+          }
+          if (foundExact || (config.inverterSerial.trim().isEmpty && config.loggerSerial.trim().isEmpty)) {
+            break;
+          }
+        }
+      } catch (_) {
+        // Continue
+      }
+    }
+
+    var invDetail = <String, dynamic>{};
+    if (matchedInvSn.isNotEmpty) {
+      try {
+        final dResp = await http
+            .get(
+              Uri.parse(
+                '$activeBase/newInverterAPI.do?op=getInverterData&id=${Uri.encodeQueryComponent(matchedInvSn)}',
+              ),
+              headers: {'User-Agent': _ua, 'Cookie': cookieJar},
+            )
+            .timeout(const Duration(seconds: 15));
+        final dJson = _tryJsonMap(dResp.body);
+        if (dJson != null) {
+          invDetail = _asMap(dJson['obj']) ?? dJson;
+        }
+      } catch (_) {
+        // Fallback to device summary
+      }
+    }
+
+    final merged = <String, dynamic>{...chosenPlantData, ...chosenDevice, ...invDetail};
+    final liveKw = _toKwSmart(_pickNum(merged, ['pac', 'power', 'currentPower', 'ppv']), '') ?? 0.0;
+    final todayKwh = _pickNum(merged, ['eToday', 'energyToday', 'todayEnergy', 'e_today']) ?? 0.0;
+    final monthKwh = _pickNum(merged, ['eMonth', 'energyMonth']) ?? 0.0;
+    final totalKwh = _pickNum(merged, ['eTotal', 'energyTotal', 'totalEnergy']) ?? 0.0;
+    final ratedKw = _toKwSmart(_pickNum(merged, ['nominalPower', 'nominal_Power']), 'w') ?? 0.0;
+    final isLost = merged['lost'] == true || _str(merged['lost']) == 'true' || _str(merged['deviceStatus']) == '-1';
+    final plantStatus = isLost
+        ? 'offline'
+        : _str(merged['deviceStatus']) == '3'
+            ? 'fault'
+            : (liveKw > 0 ? 'online' : 'standby');
+
+    var plantName = _pickStr(merged, ['plantName']);
+    if (plantName.isEmpty) {
+      for (final p in plantItems) {
+        if (_pickStr(p, ['plantId', 'id']) == chosenPid) {
+          plantName = _pickStr(p, ['plantName', 'name']);
+          break;
+        }
+      }
+    }
+
+    return (
+      ok: true,
+      snapshot: InverterSnapshot(
+        brand: 'growatt',
+        authMode: config.authMode,
+        plantName: plantName.isNotEmpty ? plantName : 'Growatt Solar Plant',
+        plantStatus: plantStatus,
+        loggerStatus: isLost ? 'offline' : 'online',
+        currentKw: _round2(liveKw < 0 ? 0.0 : liveKw),
+        todayKwh: _round2(todayKwh < 0 ? 0.0 : todayKwh),
+        monthKwh: _round2(monthKwh < 0 ? 0.0 : monthKwh),
+        totalKwh: _round2(totalKwh < 0 ? 0.0 : totalKwh),
+        ratedKw: _round2(ratedKw < 0 ? 0.0 : ratedKw),
+        gridVoltageV: _pickNum(merged, ['vacr', 'vac1', 'vGrid']),
+        inverterTempC: _pickNum(merged, ['temperature', 'temp1', 'invTemperature']),
+        batterySocPct: _pickNum(merged, ['soc', 'batterySoc']),
+        dailyLogs: const [],
+        syncedAt: DateTime.now().millisecondsSinceEpoch,
+        note: 'Growatt Cloud · ${matchedInvSn.isNotEmpty ? matchedInvSn : chosenPid}',
+      ),
+      error: null,
+    );
+  }
+
+  // ==================== 4. SOLARMAN SMART / BUSINESS ====================
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncSolarmanDirect(
+    InverterConfig config,
+    String password,
+    String apiSecret,
+  ) async {
+    final user = config.username.trim();
+    final appId = config.apiKey.trim();
+    final appSec = apiSecret.trim();
+    final sha256Pwd = _sha256Hex(password);
+
+    var accessToken = '';
+    var useOpenApi = false;
+    var webOrigin = 'https://globalhome.solarmanpv.com';
+    var lastErr = 'Solarman login failed. Verify your Solarman Smart/Business email and password.';
+
+    if (appId.isNotEmpty && appSec.isNotEmpty) {
+      try {
+        final resp = await http
+            .post(
+              Uri.parse(
+                'https://globalapi.solarmanpv.com/account/v1.0/token?appId=${Uri.encodeQueryComponent(appId)}&language=en',
+              ),
+              headers: const {'User-Agent': _ua, 'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'appSecret': appSec,
+                if (user.contains('@')) 'email': user else 'username': user,
+                'password': sha256Pwd,
+              }),
+            )
+            .timeout(const Duration(seconds: 15));
+        final j = _tryJsonMap(resp.body);
+        if (resp.statusCode == 200 && j != null && _str(j['access_token']).isNotEmpty) {
+          accessToken = _str(j['access_token']);
+          useOpenApi = true;
+        } else if (j != null && _str(j['msg']).isNotEmpty) {
+          lastErr = 'Solarman OpenAPI: ${_str(j['msg'])}';
+        }
+      } catch (_) {
+        // Fallback to web OAuth
+      }
+    }
+
+    if (accessToken.isEmpty) {
+      if (user.isEmpty || password.isEmpty) {
+        return (
+          ok: false,
+          snapshot: null,
+          error: 'Enter your Solarman email/username and password (or API AppID & AppSecret).',
+        );
+      }
+      const origins = ['https://globalhome.solarmanpv.com', 'https://globalpro.solarmanpv.com'];
+      for (final orig in origins) {
+        try {
+          final resp = await http
+              .post(
+                Uri.parse('$orig/oauth-s/oauth/token'),
+                headers: const {
+                  'User-Agent': _ua,
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: {
+                  'grant_type': 'password',
+                  'username': user,
+                  'password': sha256Pwd,
+                  'clear_text_pwd': password,
+                  'identity_type': user.contains('@') ? '2' : '1',
+                  'client_id': 'test',
+                  'system': 'SOLARMAN',
+                },
+              )
+              .timeout(const Duration(seconds: 15));
+          final j = _tryJsonMap(resp.body);
+          if (resp.statusCode == 200 && j != null && _str(j['access_token']).isNotEmpty) {
+            accessToken = _str(j['access_token']);
+            webOrigin = orig;
+            break;
+          }
+          final msg = _pickStr(j, ['error_description', 'msg']);
+          if (msg.isNotEmpty) lastErr = 'Solarman: $msg';
+        } catch (_) {
+          // Try next origin
+        }
+      }
+    }
+
+    if (accessToken.isEmpty) {
+      return (ok: false, snapshot: null, error: lastErr);
+    }
+
+    final authHeader = 'bearer $accessToken';
+    if (useOpenApi) {
+      final stResp = await http
+          .post(
+            Uri.parse('https://globalapi.solarmanpv.com/station/v1.0/list?language=en'),
+            headers: {
+              'User-Agent': _ua,
+              'Content-Type': 'application/json',
+              'Authorization': authHeader,
+            },
+            body: jsonEncode({'page': 1, 'size': 20}),
+          )
+          .timeout(const Duration(seconds: 15));
+      final stJson = _tryJsonMap(stResp.body);
+      final stations = _asListOfMaps(stJson?['stationList']);
+      if (stations.isEmpty) {
+        return (ok: false, snapshot: null, error: 'Signed in to Solarman API, but no stations were found.');
+      }
+      var chosen = stations.first;
+      if (config.stationId.trim().isNotEmpty) {
+        for (final s in stations) {
+          if (_str(s['id']) == config.stationId.trim()) {
+            chosen = s;
+            break;
+          }
+        }
+      }
+      final sidStr = _str(chosen['id']);
+      final dynamic sidVal = int.tryParse(sidStr) ?? sidStr;
+      final rtResp = await http
+          .post(
+            Uri.parse('https://globalapi.solarmanpv.com/station/v1.0/realTime?language=en'),
+            headers: {
+              'User-Agent': _ua,
+              'Content-Type': 'application/json',
+              'Authorization': authHeader,
+            },
+            body: jsonEncode({'stationId': sidVal}),
+          )
+          .timeout(const Duration(seconds: 15));
+      final rt = _tryJsonMap(rtResp.body) ?? const <String, dynamic>{};
+      final liveW = _pickNum(rt, ['generationPower']) ?? 0.0;
+      final todayKwh = _pickNum(rt, ['generationValue']) ?? 0.0;
+      final totalKwh = _pickNum(rt, ['generationTotal']) ?? 0.0;
+      final ratedKw = _toKwSmart(_pickNum(chosen, ['installedCapacity']), 'kw') ?? 0.0;
+
+      return (
+        ok: true,
+        snapshot: InverterSnapshot(
+          brand: 'solarman',
+          authMode: 'api',
+          plantName: _pickStr(chosen, ['name']).isNotEmpty ? _pickStr(chosen, ['name']) : 'Solarman Plant',
+          plantStatus: liveW > 0 ? 'online' : 'standby',
+          loggerStatus: 'online',
+          currentKw: _round2(liveW < 0 ? 0.0 : liveW / 1000.0),
+          todayKwh: _round2(todayKwh < 0 ? 0.0 : todayKwh),
+          monthKwh: 0.0,
+          totalKwh: _round2(totalKwh < 0 ? 0.0 : totalKwh),
+          ratedKw: _round2(ratedKw < 0 ? 0.0 : ratedKw),
+          batterySocPct: _pickNum(rt, ['batterySoc']),
+          dailyLogs: const [],
+          syncedAt: DateTime.now().millisecondsSinceEpoch,
+          note: 'Solarman Cloud · $sidStr',
+        ),
+        error: null,
+      );
+    }
+
+    final webResp = await http
+        .post(
+          Uri.parse(
+            '$webOrigin/maintain-s/operating/station/v2/search?page=1&size=20&order.direction=DESC&order.property=id',
+          ),
+          headers: {
+            'User-Agent': _ua,
+            'Content-Type': 'application/json',
+            'Authorization': authHeader,
+          },
+          body: '{}',
+        )
+        .timeout(const Duration(seconds: 15));
+    final webJson = _tryJsonMap(webResp.body);
+    final webStations = _asListOfMaps(webJson?['data']);
+    if (webStations.isEmpty) {
+      return (
+        ok: false,
+        snapshot: null,
+        error: 'Signed in to Solarman, but no stations were returned for this account.',
+      );
+    }
+    final chosen = webStations.first;
+    final genPowerW = _pickNum(chosen, ['generationPower']) ?? 0.0;
+    final genToday = _pickNum(chosen, ['generationValue']) ?? 0.0;
+    final genTotal = _pickNum(chosen, ['generationTotal']) ?? 0.0;
+    final cap = _pickNum(chosen, ['installedCapacity']) ?? 0.0;
+
+    return (
+      ok: true,
+      snapshot: InverterSnapshot(
+        brand: 'solarman',
+        authMode: 'website',
+        plantName: _pickStr(chosen, ['name']).isNotEmpty ? _pickStr(chosen, ['name']) : 'Solarman Plant',
+        plantStatus: genPowerW > 0 ? 'online' : 'standby',
+        loggerStatus: 'online',
+        currentKw: _round2(genPowerW < 0 ? 0.0 : genPowerW / 1000.0),
+        todayKwh: _round2(genToday < 0 ? 0.0 : genToday),
+        monthKwh: 0.0,
+        totalKwh: _round2(genTotal < 0 ? 0.0 : genTotal),
+        ratedKw: _round2(cap < 0 ? 0.0 : cap),
+        dailyLogs: const [],
+        syncedAt: DateTime.now().millisecondsSinceEpoch,
+        note: 'Solarman Web · ${_pickStr(chosen, ['name']).isNotEmpty ? _pickStr(chosen, ['name']) : 'Synced'}',
+      ),
+      error: null,
+    );
+  }
+
+  // ==================== 5. SUNGROW iSOLARCLOUD ====================
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncSungrowDirect(
+    InverterConfig config,
+    String password,
+  ) async {
+    final user = config.username.trim();
+    if (user.isEmpty || password.isEmpty) {
+      return (ok: false, snapshot: null, error: 'Enter your Sungrow iSolarCloud email/username and password.');
+    }
+
+    const appKey = 'ANDROIDE13EC118D789299C9A503F2184611882';
+    const gateways = [
+      'https://gateway.isolarcloud.com.hk',
+      'https://gateway.isolarcloud.com',
+      'https://gateway.isolarcloud.eu',
+    ];
+
+    var activeGw = gateways.first;
+    var token = '';
+    var userId = '';
+    var lastErr = 'Sungrow iSolarCloud login failed. Verify your email/username and password.';
+
+    for (final gw in gateways) {
+      try {
+        final resp = await http
+            .post(
+              Uri.parse('$gw/v1/userService/login'),
+              headers: const {
+                'User-Agent': _ua,
+                'Content-Type': 'application/json',
+                'sys_code': '900',
+              },
+              body: jsonEncode({
+                'appkey': appKey,
+                'user_account': user,
+                'user_password': password,
+                'login_type': '1',
+                'sys_code': '900',
+                'lang': '_en_US',
+              }),
+            )
+            .timeout(const Duration(seconds: 15));
+        final j = _tryJsonMap(resp.body);
+        final rd = _asMap(j?['result_data']);
+        if (resp.statusCode == 200 && _str(j?['result_code']) == '1' && _str(rd?['token']).isNotEmpty) {
+          activeGw = gw;
+          token = _str(rd?['token']);
+          userId = _str(rd?['user_id']);
+          break;
+        }
+        if (_str(j?['result_msg']).isNotEmpty) {
+          lastErr = 'Sungrow iSolarCloud: ${_str(j?['result_msg'])}';
+        }
+      } catch (_) {
+        // Try next gateway
+      }
+    }
+
+    if (token.isEmpty) {
+      return (ok: false, snapshot: null, error: lastErr);
+    }
+
+    final psResp = await http
+        .post(
+          Uri.parse('$activeGw/v1/powerStationService/getPsList'),
+          headers: const {
+            'User-Agent': _ua,
+            'Content-Type': 'application/json',
+            'sys_code': '900',
+          },
+          body: jsonEncode({
+            'appkey': appKey,
+            'token': token,
+            'user_id': userId,
+            'sys_code': '900',
+            'lang': '_en_US',
+            'curPage': 1,
+            'size': 20,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    final psJson = _tryJsonMap(psResp.body);
+    final plants = _asListOfMaps(_asMap(psJson?['result_data'])?['pageList']);
+    if (plants.isEmpty) {
+      return (
+        ok: false,
+        snapshot: null,
+        error: 'Signed in to Sungrow iSolarCloud, but no power stations were found on this account.',
+      );
+    }
+
+    var chosen = plants.first;
+    if (config.stationId.trim().isNotEmpty) {
+      for (final p in plants) {
+        if (_str(p['ps_id']) == config.stationId.trim()) {
+          chosen = p;
+          break;
+        }
+      }
+    }
+
+    ({double? val, String unit}) extractMetric(dynamic field) {
+      final m = _asMap(field);
+      if (m != null && m.containsKey('value')) {
+        return (val: _optDouble(m['value']), unit: _str(m['unit']));
+      }
+      return (val: _optDouble(field), unit: '');
+    }
+
+    final currP = extractMetric(chosen['curr_power']);
+    final todayE = extractMetric(chosen['today_energy']);
+    final totalE = extractMetric(chosen['total_energy']);
+    final capM = extractMetric(chosen['total_capcity']);
+
+    final liveKw = _toKwSmart(currP.val, currP.unit) ?? 0.0;
+    var todayKwh = todayE.val ?? 0.0;
+    if (todayE.unit.toLowerCase() == 'mwh') todayKwh *= 1000.0;
+    if (todayE.unit.toLowerCase() == 'wh') todayKwh /= 1000.0;
+    var totalKwh = totalE.val ?? 0.0;
+    if (totalE.unit.toLowerCase() == 'mwh') totalKwh *= 1000.0;
+    final ratedKw = _toKwSmart(capM.val, capM.unit.isNotEmpty ? capM.unit : 'kwp') ?? 0.0;
+
+    final psStatus = _pickNum(chosen, ['ps_status', 'ps_fault_status'])?.round();
+    final plantStatus = psStatus == 1
+        ? 'online'
+        : psStatus == 2
+            ? 'offline'
+            : psStatus == 3
+                ? 'fault'
+                : 'online';
+
+    return (
+      ok: true,
+      snapshot: InverterSnapshot(
+        brand: 'sungrow',
+        authMode: config.authMode,
+        plantName: _pickStr(chosen, ['ps_name']).isNotEmpty
+            ? _pickStr(chosen, ['ps_name'])
+            : 'Sungrow Solar Plant',
+        plantStatus: plantStatus,
+        loggerStatus: psStatus == 2 ? 'offline' : 'online',
+        currentKw: _round2(liveKw < 0 ? 0.0 : liveKw),
+        todayKwh: _round2(todayKwh < 0 ? 0.0 : todayKwh),
+        monthKwh: 0.0,
+        totalKwh: _round2(totalKwh < 0 ? 0.0 : totalKwh),
+        ratedKw: _round2(ratedKw < 0 ? 0.0 : ratedKw),
+        dailyLogs: const [],
+        syncedAt: DateTime.now().millisecondsSinceEpoch,
+        note: 'Sungrow iSolarCloud · ${_pickStr(chosen, ['ps_id'])}',
+      ),
+      error: null,
+    );
+  }
+
+  // ==================== 6. SHINEMONITOR / DESSMONITOR (Eybond SmartESS OEM Cloud) ====================
+
+  static InverterSnapshot _rebrandSnapshot(InverterSnapshot snap, String brandId, String brandLabel) {
+    return InverterSnapshot(
+      brand: brandId,
+      authMode: snap.authMode,
+      plantName: snap.plantName.isNotEmpty ? snap.plantName : '$brandLabel Plant',
+      plantStatus: snap.plantStatus,
+      loggerStatus: snap.loggerStatus,
+      currentKw: snap.currentKw,
+      todayKwh: snap.todayKwh,
+      monthKwh: snap.monthKwh,
+      totalKwh: snap.totalKwh,
+      ratedKw: snap.ratedKw,
+      gridVoltageV: snap.gridVoltageV,
+      inverterTempC: snap.inverterTempC,
+      batterySocPct: snap.batterySocPct,
+      dailyLogs: snap.dailyLogs,
+      syncedAt: snap.syncedAt,
+      note: snap.note.isNotEmpty ? '$brandLabel · ${snap.note}' : brandLabel,
+    );
+  }
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncShineMonitorDirect(
+    InverterConfig config,
+    String password, {
+    required String brandId,
+    required String brandLabel,
+  }) async {
+    final user = config.username.trim();
+    if (user.isEmpty || password.isEmpty) {
+      return (ok: false, snapshot: null, error: 'Enter your $brandLabel username/email and password.');
+    }
+
+    const hosts = [
+      'https://web.shinemonitor.com/public/',
+      'https://api.dessmonitor.com/public/',
+    ];
+    const companyKeys = ['bnrl_frRFjEz8Mkn'];
+
+    final pwdSha1 = _sha1Hex(password);
+    var activeHost = '';
+    var token = '';
+    var secret = '';
+    var lastErr = '$brandLabel login failed. Check your monitoring username and password.';
+
+    for (final host in hosts) {
+      for (final cKey in companyKeys) {
+        try {
+          final salt = DateTime.now().millisecondsSinceEpoch.toString();
+          final action =
+              '&action=authSource&usr=${Uri.encodeQueryComponent(user)}&company-key=${Uri.encodeQueryComponent(cKey)}&source=1';
+          final sign = _sha1Hex('$salt$pwdSha1$action');
+          final resp = await http
+              .get(
+                Uri.parse('$host?sign=$sign&salt=$salt$action'),
+                headers: const {'User-Agent': _ua, 'Accept': 'application/json'},
+              )
+              .timeout(const Duration(seconds: 15));
+          final j = _tryJsonMap(resp.body);
+          final err = _pickNum(j, ['err'])?.round();
+          final dat = _asMap(j?['dat']);
+          if (resp.statusCode == 200 && err == 0 && dat != null && _str(dat['token']).isNotEmpty) {
+            activeHost = host;
+            token = _str(dat['token']);
+            secret = _str(dat['secret']);
+            break;
+          }
+          final desc = _str(j?['desc']);
+          if (desc.isNotEmpty) lastErr = '$brandLabel: $desc';
+        } catch (_) {
+          // Try next host
+        }
+      }
+      if (token.isNotEmpty) break;
+    }
+
+    if (token.isEmpty || secret.isEmpty) {
+      return (ok: false, snapshot: null, error: lastErr);
+    }
+
+    Future<Map<String, dynamic>?> querySigned(String actionParams) async {
+      try {
+        final salt = DateTime.now().millisecondsSinceEpoch.toString();
+        final sign = _sha1Hex('$salt$secret$token$actionParams');
+        final r = await http
+            .get(
+              Uri.parse('$activeHost?sign=$sign&salt=$salt&token=${Uri.encodeQueryComponent(token)}$actionParams'),
+              headers: const {'User-Agent': _ua, 'Accept': 'application/json'},
+            )
+            .timeout(const Duration(seconds: 15));
+        final j = _tryJsonMap(r.body);
+        if (r.statusCode == 200 && _pickNum(j, ['err'])?.round() == 0) {
+          return j;
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    final plantsResp = await querySigned('&action=queryPlants&pagesize=20&page=0');
+    final plantsDat = _asMap(plantsResp?['dat']);
+    final plants = _asListOfMaps(plantsDat?['plant']);
+    if (plants.isEmpty) {
+      return (
+        ok: false,
+        snapshot: null,
+        error: 'Signed in to $brandLabel cloud, but no plants were found under this account.',
+      );
+    }
+
+    var chosen = plants.first;
+    if (config.stationId.trim().isNotEmpty) {
+      for (final p in plants) {
+        if (_pickStr(p, ['pid', 'plantid', 'id']) == config.stationId.trim()) {
+          chosen = p;
+          break;
+        }
+      }
+    }
+
+    final pid = _pickStr(chosen, ['pid', 'plantid', 'id']);
+    final plantName = _pickStr(chosen, ['name', 'plantname']).isNotEmpty
+        ? _pickStr(chosen, ['name', 'plantname'])
+        : '$brandLabel Solar Plant';
+    final ratedKw = _toKwSmart(_pickNum(chosen, ['nominalPower', 'capacity']), 'kw') ?? 0.0;
+
+    var liveKw = _toKwSmart(_pickNum(chosen, ['currPower', 'outputPower']), '') ?? 0.0;
+    var todayKwh = _pickNum(chosen, ['energyToday', 'dayEnergy']) ?? 0.0;
+    var monthKwh = _pickNum(chosen, ['energyMonth', 'monthEnergy']) ?? 0.0;
+    var totalKwh = _pickNum(chosen, ['energyTotal', 'totalEnergy']) ?? 0.0;
+
+    if (pid.isNotEmpty) {
+      final metrics = await Future.wait([
+        querySigned('&action=queryPlantActiveOuputPowerCurrent&plantid=${Uri.encodeQueryComponent(pid)}'),
+        querySigned('&action=queryPlantEnergyDay&plantid=${Uri.encodeQueryComponent(pid)}'),
+        querySigned('&action=queryPlantEnergyMonth&plantid=${Uri.encodeQueryComponent(pid)}'),
+        querySigned('&action=queryPlantEnergyTotal&plantid=${Uri.encodeQueryComponent(pid)}'),
+      ]);
+      final pDat = _asMap(metrics[0]?['dat']);
+      final dDat = _asMap(metrics[1]?['dat']);
+      final mDat = _asMap(metrics[2]?['dat']);
+      final tDat = _asMap(metrics[3]?['dat']);
+
+      final pVal = _pickNum(pDat, ['outputPower', 'power', 'val']);
+      if (pVal != null) liveKw = _toKwSmart(pVal, _pickStr(pDat, ['unit'])) ?? liveKw;
+      final dVal = _pickNum(dDat, ['energy', 'val']);
+      if (dVal != null) todayKwh = dVal;
+      final mVal = _pickNum(mDat, ['energy', 'val']);
+      if (mVal != null) monthKwh = mVal;
+      final tVal = _pickNum(tDat, ['energy', 'val']);
+      if (tVal != null) totalKwh = tVal;
+    }
+
+    final statusCode = _pickNum(chosen, ['status'])?.round();
+    final plantStatus = statusCode == 0
+        ? 'online'
+        : statusCode == 1
+            ? 'offline'
+            : statusCode == 4
+                ? 'fault'
+                : (liveKw > 0 ? 'online' : 'standby');
+
+    return (
+      ok: true,
+      snapshot: InverterSnapshot(
+        brand: brandId,
+        authMode: config.authMode,
+        plantName: plantName,
+        plantStatus: plantStatus,
+        loggerStatus: plantStatus == 'offline' ? 'offline' : 'online',
+        currentKw: _round2(liveKw < 0 ? 0.0 : liveKw),
+        todayKwh: _round2(todayKwh < 0 ? 0.0 : todayKwh),
+        monthKwh: _round2(monthKwh < 0 ? 0.0 : monthKwh),
+        totalKwh: _round2(totalKwh < 0 ? 0.0 : totalKwh),
+        ratedKw: _round2(ratedKw < 0 ? 0.0 : ratedKw),
+        dailyLogs: const [],
+        syncedAt: DateTime.now().millisecondsSinceEpoch,
+        note: '$brandLabel · ${pid.isNotEmpty ? pid : 'Synced'}',
+      ),
+      error: null,
+    );
+  }
+
+  // ==================== 7. POLYGUN / POLYCAB, PURE / PuREPower, HITACHI ====================
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncPolygunDirect(
+    InverterConfig config,
+    String password,
+    String apiSecret,
+  ) async {
+    final isApi = config.authMode == 'api';
+    if (isApi) {
+      final keyId = config.apiKey.trim();
+      final keySec = apiSecret.trim();
+      if (RegExp(r'^\d{15,24}$').hasMatch(keyId) && keySec.isNotEmpty) {
+        final polyApi = await _syncSolisCloudApiDirect(
+          config,
+          keyId,
+          keySec,
+          apiBase: 'https://minvertermonitoring.polycab.com:13333',
+        );
+        if (polyApi.ok && polyApi.snapshot != null) {
+          return (
+            ok: true,
+            snapshot: _rebrandSnapshot(polyApi.snapshot!, 'polygun', 'Polygun / Polycab'),
+            error: null,
+          );
+        }
+        final solisApi = await _syncSolisCloudApiDirect(config, keyId, keySec);
+        if (solisApi.ok && solisApi.snapshot != null) {
+          return (
+            ok: true,
+            snapshot: _rebrandSnapshot(solisApi.snapshot!, 'polygun', 'Polygun / Polycab'),
+            error: null,
+          );
+        }
+        return (
+          ok: false,
+          snapshot: null,
+          error: polyApi.error ?? solisApi.error ?? 'Polygun / Polycab API sync failed.',
+        );
+      }
+      final sm = await _syncSolarmanDirect(config, password, apiSecret);
+      if (sm.ok && sm.snapshot != null) {
+        return (
+          ok: true,
+          snapshot: _rebrandSnapshot(sm.snapshot!, 'polygun', 'Polygun / Polycab'),
+          error: null,
+        );
+      }
+      return (
+        ok: false,
+        snapshot: null,
+        error: sm.error ?? 'Enter your Polygun / Polycab API Key & Secret or Custom HTTPS JSON Endpoint.',
+      );
+    }
+
+    // Website mode: try Solarman -> ShineMonitor/DessMonitor -> SolisCloud
+    final sm = await _syncSolarmanDirect(config, password, apiSecret);
+    if (sm.ok && sm.snapshot != null) {
+      return (
+        ok: true,
+        snapshot: _rebrandSnapshot(sm.snapshot!, 'polygun', 'Polygun / Polycab'),
+        error: null,
+      );
+    }
+    final shine = await _syncShineMonitorDirect(
+      config,
+      password,
+      brandId: 'polygun',
+      brandLabel: 'Polygun / Polycab',
+    );
+    if (shine.ok && shine.snapshot != null) return shine;
+
+    final solis = await _syncSolisCloudWebDirect(config, password);
+    if (solis.ok && solis.snapshot != null) {
+      return (
+        ok: true,
+        snapshot: _rebrandSnapshot(solis.snapshot!, 'polygun', 'Polygun / Polycab'),
+        error: null,
+      );
+    }
+
+    return (
+      ok: false,
+      snapshot: null,
+      error:
+          'Polygun / Polycab login failed. Verify your portal username/password (Polycab Solar / Solarman / ShineMonitor), or switch to API Integration with your KeyID & KeySecret or Custom JSON Endpoint.',
+    );
+  }
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncPureDirect(
+    InverterConfig config,
+    String password,
+    String apiSecret,
+  ) async {
+    if (config.authMode == 'api') {
+      final sm = await _syncSolarmanDirect(config, password, apiSecret);
+      if (sm.ok && sm.snapshot != null) {
+        return (
+          ok: true,
+          snapshot: _rebrandSnapshot(sm.snapshot!, 'pure', 'PURE / PuREPower'),
+          error: null,
+        );
+      }
+      return (
+        ok: false,
+        snapshot: null,
+        error: sm.error ?? 'Enter your PURE / PuREPower API credentials or Custom HTTPS JSON Endpoint.',
+      );
+    }
+
+    // Website mode: PuREPower Smart ESS dongles use ShineMonitor/DessMonitor or Solarman
+    final shine = await _syncShineMonitorDirect(
+      config,
+      password,
+      brandId: 'pure',
+      brandLabel: 'PURE / PuREPower',
+    );
+    if (shine.ok && shine.snapshot != null) return shine;
+
+    final sm = await _syncSolarmanDirect(config, password, apiSecret);
+    if (sm.ok && sm.snapshot != null) {
+      return (
+        ok: true,
+        snapshot: _rebrandSnapshot(sm.snapshot!, 'pure', 'PURE / PuREPower'),
+        error: null,
+      );
+    }
+
+    return (
+      ok: false,
+      snapshot: null,
+      error:
+          'PURE / PuREPower login failed. Verify your SmartESS / Solarman dongle credentials, or switch to API Integration and enter your Custom HTTPS JSON Endpoint.',
+    );
+  }
+
+  static Future<({bool ok, InverterSnapshot? snapshot, String? error})> _syncHitachiDirect(
+    InverterConfig config,
+    String password,
+    String apiSecret,
+  ) async {
+    if (config.authMode == 'api') {
+      final keyId = config.apiKey.trim();
+      final keySec = apiSecret.trim();
+      if (RegExp(r'^\d{15,24}$').hasMatch(keyId) && keySec.isNotEmpty) {
+        final sol = await _syncSolisCloudApiDirect(config, keyId, keySec);
+        if (sol.ok && sol.snapshot != null) {
+          return (
+            ok: true,
+            snapshot: _rebrandSnapshot(sol.snapshot!, 'hitachi', 'Hitachi Solar'),
+            error: null,
+          );
+        }
+      }
+      final sm = await _syncSolarmanDirect(config, password, apiSecret);
+      if (sm.ok && sm.snapshot != null) {
+        return (
+          ok: true,
+          snapshot: _rebrandSnapshot(sm.snapshot!, 'hitachi', 'Hitachi Solar'),
+          error: null,
+        );
+      }
+      return (
+        ok: false,
+        snapshot: null,
+        error: sm.error ?? 'Enter your Hitachi Solar API credentials or Custom HTTPS JSON Endpoint.',
+      );
+    }
+
+    // Website mode: Hitachi Hi-Rel Wi-Fi loggers use Solarman, ShineMonitor/DessMonitor, or SolisCloud
+    final sm = await _syncSolarmanDirect(config, password, apiSecret);
+    if (sm.ok && sm.snapshot != null) {
+      return (
+        ok: true,
+        snapshot: _rebrandSnapshot(sm.snapshot!, 'hitachi', 'Hitachi Solar'),
+        error: null,
+      );
+    }
+
+    final shine = await _syncShineMonitorDirect(
+      config,
+      password,
+      brandId: 'hitachi',
+      brandLabel: 'Hitachi Solar',
+    );
+    if (shine.ok && shine.snapshot != null) return shine;
+
+    final solis = await _syncSolisCloudWebDirect(config, password);
+    if (solis.ok && solis.snapshot != null) {
+      return (
+        ok: true,
+        snapshot: _rebrandSnapshot(solis.snapshot!, 'hitachi', 'Hitachi Solar'),
+        error: null,
+      );
+    }
+
+    return (
+      ok: false,
+      snapshot: null,
+      error:
+          'Hitachi Solar login failed. Verify your Wi-Fi logger portal credentials (Solarman / ShineMonitor / SolisCloud), or switch to API Integration with your Custom HTTPS JSON Endpoint.',
+    );
+  }
+
+  // ==================== Pure-Dart RFC Crypto & Date Helpers (Zero Extra Packages) ====================
+
+  static String _rfc1123Utc(DateTime utc) {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final wd = days[utc.weekday - 1];
+    final dd = utc.day.toString().padLeft(2, '0');
+    final mo = months[utc.month - 1];
+    final yyyy = utc.year.toString().padLeft(4, '0');
+    final hh = utc.hour.toString().padLeft(2, '0');
+    final mm = utc.minute.toString().padLeft(2, '0');
+    final ss = utc.second.toString().padLeft(2, '0');
+    return '$wd, $dd $mo $yyyy $hh:$mm:$ss GMT';
+  }
+
+  static String _bytesToHex(Uint8List bytes) {
+    const hex = '0123456789abcdef';
+    final sb = StringBuffer();
+    for (final b in bytes) {
+      sb.write(hex[(b >> 4) & 0x0f]);
+      sb.write(hex[b & 0x0f]);
+    }
+    return sb.toString();
+  }
+
+  static int _rotl32(int x, int n) {
+    final u = x & 0xffffffff;
+    return ((u << n) & 0xffffffff) | (u >> (32 - n));
+  }
+
+  static int _rotr32(int x, int n) {
+    final u = x & 0xffffffff;
+    return (u >> n) | ((u << (32 - n)) & 0xffffffff);
+  }
+
+  /// RFC 1321 MD5 digest (pure Dart, zero dependencies).
+  static Uint8List _md5Bytes(Uint8List input) {
+    const s = <int>[
+      7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+      5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+      4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+      6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+    ];
+    const k = <int>[
+      0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
+      0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+      0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
+      0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+      0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa,
+      0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+      0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
+      0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+      0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
+      0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+      0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05,
+      0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+      0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039,
+      0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+      0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
+      0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
+    ];
+
+    final origLen = input.length;
+    final bitLen = origLen * 8;
+    final padLen = ((56 - ((origLen + 1) % 64)) + 64) % 64;
+    final msg = Uint8List(origLen + 1 + padLen + 8);
+    msg.setRange(0, origLen, input);
+    msg[origLen] = 0x80;
+
+    final lowBits = bitLen & 0xffffffff;
+    final highBits = (bitLen ~/ 0x100000000) & 0xffffffff;
+    final lenOff = msg.length - 8;
+    msg[lenOff] = lowBits & 0xff;
+    msg[lenOff + 1] = (lowBits >> 8) & 0xff;
+    msg[lenOff + 2] = (lowBits >> 16) & 0xff;
+    msg[lenOff + 3] = (lowBits >> 24) & 0xff;
+    msg[lenOff + 4] = highBits & 0xff;
+    msg[lenOff + 5] = (highBits >> 8) & 0xff;
+    msg[lenOff + 6] = (highBits >> 16) & 0xff;
+    msg[lenOff + 7] = (highBits >> 24) & 0xff;
+
+    var a0 = 0x67452301;
+    var b0 = 0xefcdab89;
+    var c0 = 0x98badcfe;
+    var d0 = 0x10325476;
+    final m = List<int>.filled(16, 0);
+
+    for (var offset = 0; offset < msg.length; offset += 64) {
+      for (var i = 0; i < 16; i++) {
+        final j = offset + i * 4;
+        m[i] = msg[j] | (msg[j + 1] << 8) | (msg[j + 2] << 16) | (msg[j + 3] << 24);
+      }
+
+      var a = a0;
+      var b = b0;
+      var c = c0;
+      var d = d0;
+
+      for (var i = 0; i < 64; i++) {
+        int f;
+        int g;
+        if (i < 16) {
+          f = ((b & c) | ((~b & 0xffffffff) & d)) & 0xffffffff;
+          g = i;
+        } else if (i < 32) {
+          f = ((d & b) | ((~d & 0xffffffff) & c)) & 0xffffffff;
+          g = (5 * i + 1) % 16;
+        } else if (i < 48) {
+          f = (b ^ c ^ d) & 0xffffffff;
+          g = (3 * i + 5) % 16;
+        } else {
+          f = (c ^ (b | (~d & 0xffffffff))) & 0xffffffff;
+          g = (7 * i) % 16;
+        }
+        final sum = (a + f + k[i] + m[g]) & 0xffffffff;
+        a = d;
+        d = c;
+        c = b;
+        b = (b + _rotl32(sum, s[i])) & 0xffffffff;
+      }
+
+      a0 = (a0 + a) & 0xffffffff;
+      b0 = (b0 + b) & 0xffffffff;
+      c0 = (c0 + c) & 0xffffffff;
+      d0 = (d0 + d) & 0xffffffff;
+    }
+
+    final out = Uint8List(16);
+    final words = [a0, b0, c0, d0];
+    for (var i = 0; i < 4; i++) {
+      out[i * 4] = words[i] & 0xff;
+      out[i * 4 + 1] = (words[i] >> 8) & 0xff;
+      out[i * 4 + 2] = (words[i] >> 16) & 0xff;
+      out[i * 4 + 3] = (words[i] >> 24) & 0xff;
+    }
+    return out;
+  }
+
+  static String _md5Hex(String s) => _bytesToHex(_md5Bytes(Uint8List.fromList(utf8.encode(s))));
+
+  static String _md5Base64(String s) => base64Encode(_md5Bytes(Uint8List.fromList(utf8.encode(s))));
+
+  /// FIPS 180-4 SHA-1 digest (pure Dart, zero dependencies).
+  static Uint8List _sha1Bytes(Uint8List input) {
+    final origLen = input.length;
+    final bitLen = origLen * 8;
+    final padLen = ((56 - ((origLen + 1) % 64)) + 64) % 64;
+    final msg = Uint8List(origLen + 1 + padLen + 8);
+    msg.setRange(0, origLen, input);
+    msg[origLen] = 0x80;
+
+    final highBits = (bitLen ~/ 0x100000000) & 0xffffffff;
+    final lowBits = bitLen & 0xffffffff;
+    final lenOff = msg.length - 8;
+    msg[lenOff] = (highBits >> 24) & 0xff;
+    msg[lenOff + 1] = (highBits >> 16) & 0xff;
+    msg[lenOff + 2] = (highBits >> 8) & 0xff;
+    msg[lenOff + 3] = highBits & 0xff;
+    msg[lenOff + 4] = (lowBits >> 24) & 0xff;
+    msg[lenOff + 5] = (lowBits >> 16) & 0xff;
+    msg[lenOff + 6] = (lowBits >> 8) & 0xff;
+    msg[lenOff + 7] = lowBits & 0xff;
+
+    var h0 = 0x67452301;
+    var h1 = 0xefcdab89;
+    var h2 = 0x98badcfe;
+    var h3 = 0x10325476;
+    var h4 = 0xc3d2e1f0;
+    final w = List<int>.filled(80, 0);
+
+    for (var offset = 0; offset < msg.length; offset += 64) {
+      for (var i = 0; i < 16; i++) {
+        final j = offset + i * 4;
+        w[i] = (msg[j] << 24) | (msg[j + 1] << 16) | (msg[j + 2] << 8) | msg[j + 3];
+      }
+      for (var i = 16; i < 80; i++) {
+        w[i] = _rotl32((w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]) & 0xffffffff, 1);
+      }
+
+      var a = h0;
+      var b = h1;
+      var c = h2;
+      var d = h3;
+      var e = h4;
+
+      for (var i = 0; i < 80; i++) {
+        int f;
+        int k;
+        if (i < 20) {
+          f = ((b & c) | ((~b & 0xffffffff) & d)) & 0xffffffff;
+          k = 0x5a827999;
+        } else if (i < 40) {
+          f = (b ^ c ^ d) & 0xffffffff;
+          k = 0x6ed9eba1;
+        } else if (i < 60) {
+          f = ((b & c) | (b & d) | (c & d)) & 0xffffffff;
+          k = 0x8f1bbcdc;
+        } else {
+          f = (b ^ c ^ d) & 0xffffffff;
+          k = 0xca62c1d6;
+        }
+        final temp = (_rotl32(a, 5) + f + e + k + w[i]) & 0xffffffff;
+        e = d;
+        d = c;
+        c = _rotl32(b, 30);
+        b = a;
+        a = temp;
+      }
+
+      h0 = (h0 + a) & 0xffffffff;
+      h1 = (h1 + b) & 0xffffffff;
+      h2 = (h2 + c) & 0xffffffff;
+      h3 = (h3 + d) & 0xffffffff;
+      h4 = (h4 + e) & 0xffffffff;
+    }
+
+    final out = Uint8List(20);
+    final words = [h0, h1, h2, h3, h4];
+    for (var i = 0; i < 5; i++) {
+      out[i * 4] = (words[i] >> 24) & 0xff;
+      out[i * 4 + 1] = (words[i] >> 16) & 0xff;
+      out[i * 4 + 2] = (words[i] >> 8) & 0xff;
+      out[i * 4 + 3] = words[i] & 0xff;
+    }
+    return out;
+  }
+
+  static String _sha1Hex(String s) => _bytesToHex(_sha1Bytes(Uint8List.fromList(utf8.encode(s))));
+
+  /// RFC 2104 HMAC-SHA1 encoded as Base64.
+  static String _hmacSha1Base64(String key, String message) {
+    var keyBytes = Uint8List.fromList(utf8.encode(key));
+    if (keyBytes.length > 64) {
+      keyBytes = _sha1Bytes(keyBytes);
+    }
+    final blockKey = Uint8List(64);
+    blockKey.setRange(0, keyBytes.length, keyBytes);
+
+    final msgBytes = utf8.encode(message);
+    final inner = Uint8List(64 + msgBytes.length);
+    final outer = Uint8List(64 + 20);
+    for (var i = 0; i < 64; i++) {
+      inner[i] = blockKey[i] ^ 0x36;
+      outer[i] = blockKey[i] ^ 0x5c;
+    }
+    inner.setRange(64, 64 + msgBytes.length, msgBytes);
+    final innerHash = _sha1Bytes(inner);
+    outer.setRange(64, 84, innerHash);
+    return base64Encode(_sha1Bytes(outer));
+  }
+
+  /// FIPS 180-4 SHA-256 hex digest (pure Dart, zero dependencies).
+  static String _sha256Hex(String text) {
+    const k = <int>[
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+
+    final input = Uint8List.fromList(utf8.encode(text));
+    final origLen = input.length;
+    final bitLen = origLen * 8;
+    final padLen = ((56 - ((origLen + 1) % 64)) + 64) % 64;
+    final msg = Uint8List(origLen + 1 + padLen + 8);
+    msg.setRange(0, origLen, input);
+    msg[origLen] = 0x80;
+
+    final highBits = (bitLen ~/ 0x100000000) & 0xffffffff;
+    final lowBits = bitLen & 0xffffffff;
+    final lenOff = msg.length - 8;
+    msg[lenOff] = (highBits >> 24) & 0xff;
+    msg[lenOff + 1] = (highBits >> 16) & 0xff;
+    msg[lenOff + 2] = (highBits >> 8) & 0xff;
+    msg[lenOff + 3] = highBits & 0xff;
+    msg[lenOff + 4] = (lowBits >> 24) & 0xff;
+    msg[lenOff + 5] = (lowBits >> 16) & 0xff;
+    msg[lenOff + 6] = (lowBits >> 8) & 0xff;
+    msg[lenOff + 7] = lowBits & 0xff;
+
+    var h0 = 0x6a09e667;
+    var h1 = 0xbb67ae85;
+    var h2 = 0x3c6ef372;
+    var h3 = 0xa54ff53a;
+    var h4 = 0x510e527f;
+    var h5 = 0x9b05688c;
+    var h6 = 0x1f83d9ab;
+    var h7 = 0x5be0cd19;
+    final w = List<int>.filled(64, 0);
+
+    for (var offset = 0; offset < msg.length; offset += 64) {
+      for (var i = 0; i < 16; i++) {
+        final j = offset + i * 4;
+        w[i] = (msg[j] << 24) | (msg[j + 1] << 16) | (msg[j + 2] << 8) | msg[j + 3];
+      }
+      for (var i = 16; i < 64; i++) {
+        final s0 = _rotr32(w[i - 15], 7) ^ _rotr32(w[i - 15], 18) ^ ((w[i - 15] & 0xffffffff) >> 3);
+        final s1 = _rotr32(w[i - 2], 17) ^ _rotr32(w[i - 2], 19) ^ ((w[i - 2] & 0xffffffff) >> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) & 0xffffffff;
+      }
+
+      var a = h0;
+      var b = h1;
+      var c = h2;
+      var d = h3;
+      var e = h4;
+      var f = h5;
+      var g = h6;
+      var h = h7;
+
+      for (var i = 0; i < 64; i++) {
+        final s1 = _rotr32(e, 6) ^ _rotr32(e, 11) ^ _rotr32(e, 25);
+        final ch = ((e & f) ^ ((~e & 0xffffffff) & g)) & 0xffffffff;
+        final temp1 = (h + s1 + ch + k[i] + w[i]) & 0xffffffff;
+        final s0 = _rotr32(a, 2) ^ _rotr32(a, 13) ^ _rotr32(a, 22);
+        final maj = ((a & b) ^ (a & c) ^ (b & c)) & 0xffffffff;
+        final temp2 = (s0 + maj) & 0xffffffff;
+
+        h = g;
+        g = f;
+        f = e;
+        e = (d + temp1) & 0xffffffff;
+        d = c;
+        c = b;
+        b = a;
+        a = (temp1 + temp2) & 0xffffffff;
+      }
+
+      h0 = (h0 + a) & 0xffffffff;
+      h1 = (h1 + b) & 0xffffffff;
+      h2 = (h2 + c) & 0xffffffff;
+      h3 = (h3 + d) & 0xffffffff;
+      h4 = (h4 + e) & 0xffffffff;
+      h5 = (h5 + f) & 0xffffffff;
+      h6 = (h6 + g) & 0xffffffff;
+      h7 = (h7 + h) & 0xffffffff;
+    }
+
+    final out = Uint8List(32);
+    final words = [h0, h1, h2, h3, h4, h5, h6, h7];
+    for (var i = 0; i < 8; i++) {
+      out[i * 4] = (words[i] >> 24) & 0xff;
+      out[i * 4 + 1] = (words[i] >> 16) & 0xff;
+      out[i * 4 + 2] = (words[i] >> 8) & 0xff;
+      out[i * 4 + 3] = words[i] & 0xff;
+    }
+    return _bytesToHex(out);
   }
 }

@@ -544,7 +544,8 @@ class BackendService {
     var currentKw = numVal(['currentPowerKw', 'livePowerKw', 'powerKw', 'acPowerKw', 'pacKw']);
     if (currentKw == 0) {
       final watts = numVal(['currentPowerW', 'livePowerW', 'pac', 'acPowerW', 'powerW']);
-      if (watts > 0) currentKw = watts > 200 ? watts / 1000 : watts;
+      // These keys are always watts. Dividing by 1000 keeps a 15.7 W standby reading from showing as 15.7 kW.
+      if (watts > 0) currentKw = watts / 1000;
     }
 
     final rawLogs = (j['dailyLogs'] ?? j['dailyGeneration'] ?? j['history'] ?? const []) as List;

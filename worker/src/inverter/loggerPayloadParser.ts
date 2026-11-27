@@ -464,7 +464,7 @@ function parseJsonBridgeObject(
     rawPowerKw !== undefined
       ? Number(rawPowerKw.toFixed(2))
       : rawPowerW !== undefined
-        ? normalizePowerToKw(rawPowerW, undefined, true)
+        ? normalizePowerToKw(rawPowerW, 'W', true)
         : undefined;
 
   const todayUsageKwh = readNumByKeys(dataObj, [

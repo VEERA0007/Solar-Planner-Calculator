@@ -103,6 +103,25 @@ void main() {
     }
   }
 
+  // Estimator tab (USC panel, auto-synced electricity rate) at every size, with no overflow.
+  for (final entry in sizes.entries) {
+    testWidgets('estimator ${entry.key} has no layout errors', (t) async {
+      SharedPreferences.setMockInitialValues({});
+      final s = AppState();
+      await t.runAsync(() => s.load());
+      s.prefs.dark = false;
+      t.view.physicalSize = entry.value;
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(Harness(s));
+      await t.pump(const Duration(seconds: 1));
+      await t.tap(find.text('Estimator').last);
+      await t.pump(const Duration(seconds: 1));
+      expect(t.takeException(), isNull);
+      await t.pumpWidget(const SizedBox());
+    });
+  }
+
   for (final dark in [false, true]) {
     testWidgets('service tab pages ${dark ? 'night' : 'day'} have no layout errors', (t) async {
       SharedPreferences.setMockInitialValues({});

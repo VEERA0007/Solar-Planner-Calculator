@@ -62,7 +62,7 @@ class _LocationBodyState extends State<_LocationBody> {
       busy = true;
       msg = '';
     });
-    final p = await currentPlace();
+    final p = await currentPlace(ask: true);
     if (!mounted) return;
     if (p == null) {
       setState(() {

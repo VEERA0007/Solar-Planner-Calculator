@@ -83,6 +83,9 @@ class _EstimatorPageState extends State<EstimatorPage> {
     address.text = p.address;
     uscCtrl.text = p.serviceNo;
     _takePush();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncLiveTariff();
+    });
   }
 
   @override
@@ -304,7 +307,9 @@ class _EstimatorPageState extends State<EstimatorPage> {
     }
   }
 
+  /// Rate is set by the DISCOM sync, never typed by the user. Quiet on failure: the official slab table is used.
   Future<void> _syncLiveTariff() async {
+    if (syncingTariff) return;
     setState(() => syncingTariff = true);
     final res = await BackendService.fetchRealtimeTariff(
       rawBaseUrl: s.prefs.backendUrl,
@@ -317,9 +322,8 @@ class _EstimatorPageState extends State<EstimatorPage> {
     setState(() => syncingTariff = false);
     if (res.ok && res.rate != null) {
       setState(() => tariffOverride.text = res.rate!.toStringAsFixed(2));
-      toast(context, 'Live tariff synced: ₹${res.rate!.toStringAsFixed(2)}/kWh');
     } else {
-      toast(context, 'Using official ${s.st.name('en')} slab table (${s.st.order})');
+      setState(() => tariffOverride.text = '');
     }
   }
 
@@ -768,23 +772,25 @@ class _EstimatorPageState extends State<EstimatorPage> {
             Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text(s.discom.name, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
           ]),
           const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-              child: _field(
-                tariffOverride,
-                'Custom ₹/kWh (blank = auto ${activeRate.toStringAsFixed(2)})',
-                hint: activeRate.toStringAsFixed(2),
-                prefix: '₹ ',
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: C.chipGreen,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: C.green.withValues(alpha: .35)),
+            ),
+            child: Row(children: [
+              Expanded(
+                child: Text('₹ ${activeRate.toStringAsFixed(2)} / kWh',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: C.green)),
               ),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: syncingTariff ? null : _syncLiveTariff,
-              icon: const Icon(Icons.sync, size: 17),
-              label: Text(syncingTariff ? '...' : 'Sync', style: const TextStyle(fontWeight: FontWeight.w800)),
-              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), foregroundColor: C.green, side: BorderSide(color: C.green.withValues(alpha: .6))),
-            ),
-          ]),
+              Icon(syncingTariff ? Icons.sync : Icons.verified_outlined, size: 16, color: C.green),
+              const SizedBox(width: 5),
+              Text(syncingTariff ? 'Syncing…' : 'Auto-synced by DISCOM',
+                  style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 11.5)),
+            ]),
+          ),
           const SizedBox(height: 6),
           Text('${s.st.order}. Effective ${s.st.effective}. Auto slab: ₹${(u > 0 ? plan.marginal(u) : s.unitPrice).toStringAsFixed(2)}/kWh.', style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
           _gap(),

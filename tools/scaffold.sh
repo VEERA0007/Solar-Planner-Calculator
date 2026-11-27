@@ -70,6 +70,20 @@ print('android patched')
 PY
 fi
 
+if [[ "$PLATFORMS" == *windows* ]]; then
+python3 - <<'PYWIN'
+p = 'windows/runner/main.cpp'
+s = open(p, encoding='utf-8').read()
+anchor = '  window.SetQuitOnClose(true);'
+if 'SW_MAXIMIZE' not in s and anchor in s:
+    s = s.replace(anchor, anchor + '\n  // Open full screen: the app fills the whole desktop window.\n  ::ShowWindow(window.GetHandle(), SW_MAXIMIZE);', 1)
+    open(p, 'w', encoding='utf-8').write(s)
+    print('windows: maximised on launch')
+else:
+    print('windows: anchor not found, template window size kept')
+PYWIN
+fi
+
 if [[ "$PLATFORMS" == *web* ]]; then
   sed -i.bak 's#<title>calculator</title>#<title>Solar Planner \& Calculator</title>#' web/index.html || true
 fi

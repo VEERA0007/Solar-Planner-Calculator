@@ -248,52 +248,61 @@ class _HomePageState extends State<HomePage> {
         ),
         const SizedBox(height: 12),
 
-        // ---------- hourly auto-sync ----------
+        // ---------- hourly auto-sync (compact row, same size as the inverter card) ----------
         Panel(
           radius: 22,
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Row(children: [
-              _Dot(C.green, 16),
-              const SizedBox(width: 8),
-              Icon(Icons.wifi_tethering, color: C.sky, size: 20),
-              const SizedBox(width: 6),
-              Text(t('hourly_sync'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-              const SizedBox(width: 10),
-              Icon(Icons.schedule, size: 15, color: C.mute),
-              const SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  s.lastSync == null ? '--:--' : '${t('updated')}: ${_two(s.lastSync!.hour)}:${_two(s.lastSync!.minute)}',
-                  style: TextStyle(fontFamilyFallback: kMono, color: C.mute, fontSize: 12.5),
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          child: Row(children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(13)),
+              child: Icon(Icons.wifi_tethering, color: C.sky, size: 22),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Flexible(
+                    child: Text(t('hourly_sync'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+                  ),
+                  const SizedBox(width: 6),
+                  _Dot(s.prefs.autoSync ? C.green : C.mute, 8),
+                ]),
+                Text(
+                  s.lastSync == null ? '${t('updated')}: --:--' : '${t('updated')}: ${_two(s.lastSync!.hour)}:${_two(s.lastSync!.minute)}',
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontFamilyFallback: kMono, color: C.mute, fontSize: 12),
                 ),
-              ),
-            ]),
-            const SizedBox(height: 8),
-            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-              Switch(
+              ]),
+            ),
+            Transform.scale(
+              scale: .85,
+              child: Switch(
                 value: s.prefs.autoSync,
                 onChanged: (v) {
                   s.prefs.autoSync = v;
                   s.savePrefs();
                 },
               ),
-              const SizedBox(width: 10),
-              FilledButton.icon(
-                onPressed: s.syncing
-                    ? null
-                    : () async {
-                        await s.sync();
-                        if (context.mounted) toast(context, '${t('updated')} ${clock12(DateTime.now())}');
-                      },
-                icon: s.syncing
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2.2))
-                    : const Icon(Icons.sync, size: 18),
-                label: Text(t('sync_now'), style: const TextStyle(fontWeight: FontWeight.w700)),
-                style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12)),
-              ),
-            ]),
+            ),
+            IconButton.filledTonal(
+              tooltip: t('sync_now'),
+              visualDensity: VisualDensity.compact,
+              onPressed: s.syncing
+                  ? null
+                  : () async {
+                      await s.sync();
+                      if (context.mounted) toast(context, '${t('updated')} ${clock12(DateTime.now())}');
+                    },
+              icon: s.syncing
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2.2))
+                  : const Icon(Icons.sync, size: 20),
+            ),
           ]),
         ),
         const SizedBox(height: 12),
@@ -345,88 +354,93 @@ class _HomePageState extends State<HomePage> {
         Panel(
           radius: 24,
           padding: EdgeInsets.zero,
-          child: AspectRatio(
-            aspectRatio: 2.3,
-            child: LayoutBuilder(builder: (context, box) {
-              final w = box.maxWidth, h = box.maxHeight;
-              return Stack(children: [
-                Positioned.fill(child: SunScene(night: night, t: progress)),
-                Positioned(
-                  left: 16,
-                  top: 10,
-                  bottom: 10,
-                  width: w * .40,
-                  child: IgnorePointer(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: SizedBox(
-                        width: 150,
-                        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Row(children: [
-                            Icon(Icons.change_history, size: 14, color: C.blue),
-                            const SizedBox(width: 4),
-                            Flexible(child: Text(t('altitude'), style: TextStyle(color: C.mute, fontSize: 13))),
-                          ]),
-                          const SizedBox(height: 2),
-                          Text('${pos.alt >= 0 ? '+' : ''}${pos.alt.toStringAsFixed(2)}°',
-                              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
-                          Divider(color: C.line, height: 18),
-                          Row(children: [
-                            Icon(Icons.wb_sunny_outlined, size: 16, color: C.orange),
-                            const SizedBox(width: 5),
-                            Flexible(child: Text(t('sun_status'), style: TextStyle(color: C.mute, fontSize: 13))),
-                          ]),
-                          const SizedBox(height: 2),
-                          Row(children: [
-                            Flexible(
-                              child: Text(pos.alt > 0 ? compassName(lang, pos.az) : t('below_horizon'),
-                                  style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
-                            ),
-                            const SizedBox(width: 6),
-                            _Dot(pos.alt > 0 ? C.sun : C.mute, 11),
-                          ]),
-                          const SizedBox(height: 8),
-                          Row(children: [
-                            _Dot(C.green, 8),
-                            const SizedBox(width: 5),
-                            Flexible(
-                              child: Text('${fmt1(soFar * kCo2PerKwh)} ${t('co2_avoided')}',
-                                  style: TextStyle(fontFamilyFallback: kMono, color: C.green, fontSize: 11.5)),
-                            ),
-                          ]),
-                        ]),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  right: 16,
-                  bottom: h * .06,
-                  width: w * .56,
-                  child: IgnorePointer(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerRight,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: (night ? Colors.black : Colors.white).withValues(alpha: night ? .35 : .72),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text.rich(
-                          TextSpan(children: [
-                            TextSpan(text: '${t('peak_at')} : '),
-                            TextSpan(text: info.noon == null ? '-' : clock12(info.noon!), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
-                          ]),
-                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: night ? Colors.white : const Color(0xFF1F2937)),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 430),
+              child: AspectRatio(
+                aspectRatio: 2.3,
+                child: LayoutBuilder(builder: (context, box) {
+                  final w = box.maxWidth, h = box.maxHeight;
+                  return Stack(children: [
+                    Positioned.fill(child: SunScene(night: night, t: progress)),
+                    Positioned(
+                      left: 16,
+                      top: 10,
+                      bottom: 10,
+                      width: w * .40,
+                      child: IgnorePointer(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: SizedBox(
+                            width: 150,
+                            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Row(children: [
+                                Icon(Icons.change_history, size: 14, color: C.blue),
+                                const SizedBox(width: 4),
+                                Flexible(child: Text(t('altitude'), style: TextStyle(color: C.mute, fontSize: 13))),
+                              ]),
+                              const SizedBox(height: 2),
+                              Text('${pos.alt >= 0 ? '+' : ''}${pos.alt.toStringAsFixed(2)}°',
+                                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800)),
+                              Divider(color: C.line, height: 18),
+                              Row(children: [
+                                Icon(Icons.wb_sunny_outlined, size: 16, color: C.orange),
+                                const SizedBox(width: 5),
+                                Flexible(child: Text(t('sun_status'), style: TextStyle(color: C.mute, fontSize: 13))),
+                              ]),
+                              const SizedBox(height: 2),
+                              Row(children: [
+                                Flexible(
+                                  child: Text(pos.alt > 0 ? compassName(lang, pos.az) : t('below_horizon'),
+                                      style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+                                ),
+                                const SizedBox(width: 6),
+                                _Dot(pos.alt > 0 ? C.sun : C.mute, 11),
+                              ]),
+                              const SizedBox(height: 8),
+                              Row(children: [
+                                _Dot(C.green, 8),
+                                const SizedBox(width: 5),
+                                Flexible(
+                                  child: Text('${fmt1(soFar * kCo2PerKwh)} ${t('co2_avoided')}',
+                                      style: TextStyle(fontFamilyFallback: kMono, color: C.green, fontSize: 11.5)),
+                                ),
+                              ]),
+                            ]),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-              ]);
-            }),
+                    Positioned(
+                      right: 16,
+                      bottom: h * .06,
+                      width: w * .56,
+                      child: IgnorePointer(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: (night ? Colors.black : Colors.white).withValues(alpha: night ? .35 : .72),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text.rich(
+                              TextSpan(children: [
+                                TextSpan(text: '${t('peak_at')} : '),
+                                TextSpan(text: info.noon == null ? '-' : clock12(info.noon!), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800)),
+                              ]),
+                              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: night ? Colors.white : const Color(0xFF1F2937)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ]);
+                }),
+              )
+            ),
           ),
         ),
         const SizedBox(height: 16),

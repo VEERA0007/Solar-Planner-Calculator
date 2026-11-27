@@ -113,5 +113,3 @@ Future<Irradiance> fetchIrradiance(double lat, double lon, [DateTime? at]) async
     return modelIrradiance(now, lat, lon);
   }
 }
-
-String skyLabel(double cloud) => cloud < 20 ? 'Clear sky / Optimal' : (cloud < 60 ? 'Partly cloudy' : 'Overcast');

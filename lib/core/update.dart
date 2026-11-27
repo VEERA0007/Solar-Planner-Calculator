@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'update_cancel.dart';
 import 'update_web.dart' if (dart.library.io) 'update_io.dart' as plat;
 
@@ -88,11 +87,6 @@ bool Function(String)? _assetMatcher() {
     default:
       return null;
   }
-}
-
-Future<void> openUpdate(UpdateInfo u) async {
-  final target = u.downloadUrl ?? u.pageUrl;
-  await launchUrl(Uri.parse(target), mode: LaunchMode.externalApplication);
 }
 
 /// True when this platform can download and install the update itself.

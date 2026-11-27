@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -368,8 +369,14 @@ class BackendService {
         sourceLabel: (j['source'] ?? j['verificationStatus'] ?? 'Live DISCOM').toString(),
         error: (avgUnits <= 0 && avgBill <= 0) ? 'No billing units returned for this service number.' : null,
       );
+    } on TimeoutException {
+      return UscBillResult(
+        ok: false,
+        usc: usc,
+        error: 'The DISCOM portal did not answer in time. Try again in a minute, or use the portal.',
+      );
     } catch (e) {
-      return UscBillResult(ok: false, usc: usc, error: 'Live bill fetch failed: $e');
+      return UscBillResult(ok: false, usc: usc, error: 'Live bill fetch failed. Try again in a minute.');
     }
   }
 

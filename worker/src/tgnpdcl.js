@@ -209,22 +209,31 @@ export async function fetchEasebuzzBill(usc, fetchImpl = fetch) {
 }
 
 /** Public entry point: gateway JSON for identity and amounts, HTML bill for kWh units when it parses. */
+const UPSTREAM_TIMEOUT_MS = 12000;
+
 export async function fetchTgnpdclBill(usc, fetchImpl = fetch, debug = false) {
+  // Each portal call has its own time limit, and both run at once, so one slow portal cannot hold the reply.
+  const guarded = (url, init = {}) => fetchImpl(url, { ...init, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+  const [gwRes, htmlRes] = await Promise.allSettled([
+    fetchEasebuzzBill(usc, guarded),
+    fetchTgnpdclHtml(usc, guarded, debug),
+  ]);
+
   let gw = null;
   let gwErr = null;
-  try {
-    gw = await fetchEasebuzzBill(usc, fetchImpl);
-  } catch (err) {
-    if (err.status === 404) throw err; // the portal says the number is not valid
-    gwErr = err;
+  if (gwRes.status === 'fulfilled') {
+    gw = gwRes.value;
+  } else {
+    if (gwRes.reason?.status === 404) throw gwRes.reason; // the portal says the number is not valid
+    gwErr = gwRes.reason;
   }
 
   let html = null;
   let htmlErr = null;
-  try {
-    html = await fetchTgnpdclHtml(usc, fetchImpl, debug);
-  } catch (err) {
-    htmlErr = err;
+  if (htmlRes.status === 'fulfilled') {
+    html = htmlRes.value;
+  } else {
+    htmlErr = htmlRes.reason;
   }
 
   if (!gw && !html) {

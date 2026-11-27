@@ -1,6 +1,14 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+import 'usc_http.dart' show kUscBackendUrl;
+
+/// USC digit counts per DISCOM, from the Worker's DISCOM table (worker/src/discoms.js).
+const Map<String, List<int>> kUscLengths = {
+  'TGNPDCL': [8],
+  'TGSPDCL': [9, 10, 11, 12],
+};
+
 /// Single month entry returned by a live DISCOM / USC lookup.
 class UscMonthEntry {
   final String month;
@@ -243,14 +251,24 @@ class BackendService {
     return 'https://$s';
   }
 
-  /// Pings `/api/health` on the configured backend server.
+  /// The URL the app calls: the one set in Settings, otherwise the Worker built into the app.
+  static String resolveBase(String raw) {
+    final mine = cleanBaseUrl(raw);
+    if (mine.isNotEmpty) return mine;
+    return cleanBaseUrl(kUscBackendUrl);
+  }
+
+  /// Pings `/api/health` on the backend, or its root route (the Worker answers there).
   static Future<({bool ok, String message})> checkHealth(String rawBaseUrl) async {
-    final base = cleanBaseUrl(rawBaseUrl);
+    final base = resolveBase(rawBaseUrl);
     if (base.isEmpty) {
-      return (ok: false, message: 'Enter your deployed Render or Cloud Run backend URL first.');
+      return (ok: false, message: 'No backend URL is built into this app, and none is set in Settings.');
     }
     try {
-      final r = await http.get(Uri.parse('$base/api/health')).timeout(const Duration(seconds: 10));
+      var r = await http.get(Uri.parse('$base/api/health')).timeout(const Duration(seconds: 10));
+      if (r.statusCode != 200) {
+        r = await http.get(Uri.parse('$base/')).timeout(const Duration(seconds: 10));
+      }
       if (r.statusCode == 200) {
         final j = jsonDecode(r.body);
         final status = (j is Map ? j['status'] : null) ?? 'ok';
@@ -270,29 +288,32 @@ class BackendService {
     required String discomId,
     required String category,
   }) async {
-    final base = cleanBaseUrl(rawBaseUrl);
-    if (base.isEmpty) {
+    final base = resolveBase(rawBaseUrl);
+    final discom = discomId.trim().toUpperCase();
+    final digits = usc.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      return UscBillResult(ok: false, usc: usc, error: 'Enter your USC / service number.');
+    }
+    final lengths = kUscLengths[discom];
+    if (lengths != null && !lengths.contains(digits.length)) {
+      final want = lengths.length == 1 ? '${lengths.first} digits' : '${lengths.first} to ${lengths.last} digits';
       return UscBillResult(
         ok: false,
         usc: usc,
-        error: 'Set your Backend Server URL in Settings → Display to enable live DISCOM bill fetch, or tap Open Portal below.',
+        error: '$discom USC numbers are $want. You entered ${digits.length} digits.',
       );
+    }
+    if (base.isEmpty) {
+      return UscBillResult(ok: false, usc: usc, error: 'The live bill service is not set up in this build.');
     }
     try {
       final resp = await http
           .post(
-            Uri.parse('$base/api/utility/service-usage'),
+            Uri.parse('$base/api/usc/fetch'),
             headers: const {'Content-Type': 'application/json', 'Accept': 'application/json'},
-            body: jsonEncode({
-              'uscNumber': usc,
-              'serviceNumber': usc,
-              'stateId': stateId,
-              'discomId': discomId,
-              'category': category,
-              'requestedMonths': 12,
-            }),
+            body: jsonEncode({'usc': digits, 'discom': discom}),
           )
-          .timeout(const Duration(seconds: 25));
+          .timeout(const Duration(seconds: 40));
 
       final dynamic raw = jsonDecode(resp.body);
       if (raw is! Map) {
@@ -300,15 +321,18 @@ class BackendService {
       }
       final j = raw.cast<String, dynamic>();
       if (resp.statusCode != 200 || j['ok'] == false) {
+        final needsCode = resp.statusCode == 409 || j['captchaRequired'] == true;
         return UscBillResult(
           ok: false,
           usc: usc,
-          error: (j['error'] ?? j['message'] ?? 'DISCOM lookup failed (HTTP ${resp.statusCode}).').toString(),
+          error: needsCode
+              ? '$discom needs a security code, which this screen does not support yet. Use the portal for now.'
+              : (j['error'] ?? j['message'] ?? 'DISCOM lookup failed (HTTP ${resp.statusCode}).').toString(),
         );
       }
 
       final consumer = (j['consumer'] is Map) ? (j['consumer'] as Map).cast<String, dynamic>() : const <String, dynamic>{};
-      final rawHist = (j['history'] ?? j['monthlyHistory'] ?? j['bills'] ?? const []) as List;
+      final rawHist = (j['months'] ?? j['history'] ?? j['monthlyHistory'] ?? const []) as List;
       final history = rawHist
           .whereType<Map>()
           .map((e) => UscMonthEntry.fromJson(e.cast<String, dynamic>()))
@@ -357,7 +381,7 @@ class BackendService {
     required String category,
     required double monthlyUnits,
   }) async {
-    final base = cleanBaseUrl(rawBaseUrl);
+    final base = resolveBase(rawBaseUrl);
     if (base.isEmpty) {
       return (ok: false, rate: null, label: null, error: 'No backend URL configured');
     }
@@ -423,7 +447,7 @@ class BackendService {
       }
     }
 
-    final base = cleanBaseUrl(rawBaseUrl);
+    final base = resolveBase(rawBaseUrl);
     if (base.isEmpty) {
       return (
         ok: false,
@@ -533,14 +557,14 @@ class BackendService {
     return InverterSnapshot(
       brand: (j['brand'] ?? brand).toString(),
       authMode: authMode,
-      plantName: (j['plantName'] ?? j['stationName'] ?? j['deviceName'] ?? '').toString(),
+      plantName: (j['plantName'] ?? j['detectedPlantName'] ?? j['stationName'] ?? j['deviceName'] ?? '').toString(),
       plantStatus: plantStatus,
       loggerStatus: loggerStatus,
       currentKw: currentKw,
-      todayKwh: numVal(['todayKwh', 'dailyEnergyKwh', 'eToday', 'todayGenerationKwh', 'dayEnergy']),
+      todayKwh: numVal(['todayKwh', 'todayGenKwh', 'dailyEnergyKwh', 'eToday', 'todayGenerationKwh', 'dayEnergy']),
       monthKwh: numVal(['monthKwh', 'monthlyEnergyKwh', 'eMonth', 'monthEnergy']),
       totalKwh: numVal(['totalKwh', 'totalEnergyKwh', 'eTotal', 'lifetimeKwh']),
-      ratedKw: numVal(['ratedKw', 'capacityKw', 'installedCapacityKw', 'systemSizeKw']),
+      ratedKw: numVal(['ratedKw', 'detectedCapacityKwp', 'capacityKw', 'installedCapacityKw', 'systemSizeKw']),
       gridVoltageV: optNum(['gridVoltageV', 'acVoltageV', 'uAc1']),
       inverterTempC: optNum(['inverterTempC', 'temperatureC', 'tempC']),
       batterySocPct: optNum(['batterySocPct', 'batterySoc', 'soc']),

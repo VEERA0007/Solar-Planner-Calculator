@@ -247,10 +247,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   Future<void> _fetchUsc() async {
     final clean = normalizeUsc(uscCtrl.text);
-    if (clean.length < 6) {
+    if (clean.isEmpty) {
       setState(() {
         uscErr = true;
-        uscMsg = 'Enter a valid USC / Consumer Service Number (minimum 6 characters).';
+        uscMsg = 'Enter your USC / Consumer Service Number.';
       });
       return;
     }

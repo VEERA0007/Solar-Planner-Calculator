@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/appliance_data.dart';
+import '../core/backend_service.dart';
 import '../core/calc.dart';
 import '../core/estimator_data.dart';
 import '../core/service_data.dart';
@@ -11,8 +12,9 @@ import 'pdf_quote.dart';
 import 'roof_map.dart';
 import 'theme.dart';
 
-/// Solar Estimator: New Install flow (inputs, system, cost, ROI, customer page),
-/// Existing Plant (next build) and Generation.
+/// Solar Estimator: New Install (with 4-state USC bill fetch, inline tariff/DISCOM
+/// selector, custom rate override, roof map, BOM, ROI & Customer page),
+/// Existing Plant Audit, and standalone Power Generation & Yield Calculator.
 class EstimatorPage extends StatefulWidget {
   final AppState state;
   const EstimatorPage({super.key, required this.state});
@@ -28,15 +30,33 @@ class _EstimatorPageState extends State<EstimatorPage> {
   bool dcr = true;
   SysType sys = SysType.onGrid;
   int panelIdx = 1;
-  bool billHelp = false;
   bool custOpen = false;
+  bool uscOpen = false;
+  bool bomOpen = false;
+  int bomTab = 0;
   double escalation = 3, omPct = 1;
   bool yearly = false;
   Map<SysType, SysOption> opts = {};
   bool slabOpen = false;
 
+  // Live USC & Tariff sync state
+  bool fetchingUsc = false;
+  bool syncingTariff = false;
+  bool uscRefreshingCaptcha = false;
+  bool uscNeedsMobile = false;
+  String uscMsg = '';
+  String uscMeta = '';
+  String uscEbillUrl = '';
+  bool uscErr = false;
+  UscCaptchaChallenge? uscCaptcha;
+  List<UscMonthEntry> uscMonths = [];
+
   final units = TextEditingController(text: '400');
   final bill = TextEditingController();
+  final uscCtrl = TextEditingController();
+  final captchaCtrl = TextEditingController();
+  final uscMobileCtrl = TextEditingController();
+  final tariffOverride = TextEditingController();
   final roof = TextEditingController();
   final backup = TextEditingController();
   final inverterBrand = TextEditingController();
@@ -44,8 +64,16 @@ class _EstimatorPageState extends State<EstimatorPage> {
   final phone = TextEditingController();
   final address = TextEditingController();
   final search = TextEditingController();
-  final exWp = TextEditingController(text: '550'), exQty = TextEditingController(), exInv = TextEditingController(), exGen = TextEditingController();
+  final exWp = TextEditingController(text: '550'),
+      exQty = TextEditingController(),
+      exInv = TextEditingController(),
+      exGen = TextEditingController();
   final customCost = TextEditingController();
+  // Standalone Generation tab controllers
+  final genKw = TextEditingController(text: '3.0');
+  final genUse = TextEditingController(text: '400');
+  final genTariff = TextEditingController();
+
   String exArch = 'String inverter (Central MPPT)';
   double? invOverride; // chosen inverter size in kW, null = the suggested size
   String payMsg = '';
@@ -60,6 +88,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     name.text = p.name;
     phone.text = p.mobile;
     address.text = p.address;
+    uscCtrl.text = p.serviceNo;
     _takePush();
   }
 
@@ -71,7 +100,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   @override
   void dispose() {
-    for (final c in [units, bill, roof, backup, inverterBrand, name, phone, address, search, exWp, exQty, exInv, exGen, customCost]) {
+    for (final c in [
+      units, bill, uscCtrl, captchaCtrl, uscMobileCtrl, tariffOverride, roof, backup, inverterBrand,
+      name, phone, address, search, exWp, exQty, exInv, exGen, customCost,
+      genKw, genUse, genTariff,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -113,10 +146,18 @@ class _EstimatorPageState extends State<EstimatorPage> {
   double get _monthlyUnits {
     switch (mode) {
       case 'bill':
+        final ov = _num(tariffOverride);
+        if (ov > 0) return _num(bill) / ov;
         return s.tariffCat.unitsForBill(_num(bill));
       default:
         return _num(units);
     }
+  }
+
+  double _activeRate(double u) {
+    final ov = _num(tariffOverride);
+    if (ov > 0) return ov;
+    return u > 0 ? s.tariffCat.marginal(u) : s.unitPrice;
   }
 
   PanelModel get _panel {
@@ -135,7 +176,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   Map<SysType, SysOption> _options(double u) {
     final daily = u / 30;
-    final marginal = s.tariffCat.marginal(u);
+    final rate = _activeRate(u);
     return {
       for (final t in SysType.values)
         t: buildOption(
@@ -143,7 +184,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
           dailyKwh: daily,
           connectedKw: daily / 5,
           yieldPerKwp: s.locationYield,
-          tariff: marginal,
+          tariff: rate,
           dcr: dcr,
           profile: _profile,
           backupHours: _num(backup),
@@ -153,7 +194,12 @@ class _EstimatorPageState extends State<EstimatorPage> {
     };
   }
 
-  Customer _readCustomer() => Customer(name: name.text.trim(), phone: phone.text.trim(), address: address.text.trim());
+  Customer _readCustomer() => Customer(
+        usc: normalizeUsc(uscCtrl.text),
+        name: name.text.trim(),
+        phone: phone.text.trim(),
+        address: address.text.trim(),
+      );
 
   /// Builds the three options and the savings result. [go] opens the results page.
   void _calc({bool go = true}) {
@@ -163,15 +209,16 @@ class _EstimatorPageState extends State<EstimatorPage> {
       return;
     }
     final plan = s.tariffCat;
+    final ov = _num(tariffOverride);
     opts = _options(u);
     final o = opts[sys]!;
     final y = s.locationYield;
     final off = (o.kwp * y * 30) < u ? o.kwp * y * 30 : u;
-    final eff = off > 0 ? (plan.bill(u) - plan.bill(u - off)) / off : plan.marginal(u);
+    final eff = ov > 0 ? ov : (off > 0 ? (plan.bill(u) - plan.bill(u - off)) / off : plan.marginal(u));
     final inp = EstimateInput(
       mode: 'units',
       monthlyUnits: u,
-      monthlyBill: plan.bill(u),
+      monthlyBill: ov > 0 ? u * ov : plan.bill(u),
       tariff: double.parse(eff.toStringAsFixed(2)),
       coverage: 100,
       yieldPerKwDay: double.parse(y.toStringAsFixed(2)),
@@ -190,6 +237,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
     s.customer = _readCustomer();
     s.result = calculate(inp);
     s.publishEstimate(s.result!.kw, inp.tariff);
+    // Sync Generation tab inputs with latest estimate
+    genKw.text = s.result!.kw.toStringAsFixed(2);
+    genUse.text = u.round().toString();
+    genTariff.text = inp.tariff.toStringAsFixed(2);
     if (go) {
       setState(() => stage = 1);
     } else {
@@ -199,6 +250,152 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   void _recalc() {
     if (s.result != null) _calc(go: false);
+  }
+
+  Future<void> _refreshCaptcha() async {
+    setState(() => uscRefreshingCaptcha = true);
+    final fresh = await BackendService.refreshCaptcha(s.prefs.backendUrl);
+    if (!mounted) return;
+    setState(() {
+      uscRefreshingCaptcha = false;
+      if (fresh != null) {
+        uscCaptcha = fresh;
+        captchaCtrl.clear();
+      } else {
+        uscErr = true;
+        uscMsg = 'Could not refresh security code. Check your API Server URL and try again.';
+      }
+    });
+  }
+
+  Future<void> _fetchUsc({bool withCaptcha = false}) async {
+    final clean = normalizeUsc(uscCtrl.text);
+    if (clean.length < 6) {
+      setState(() {
+        uscErr = true;
+        uscMsg = 'Enter a valid USC / Consumer Service Number (minimum 6 characters).';
+      });
+      return;
+    }
+    if (withCaptcha && captchaCtrl.text.trim().isEmpty) {
+      setState(() {
+        uscErr = true;
+        uscMsg = 'Enter the security code shown in the image first.';
+      });
+      return;
+    }
+    final cleanMobile = uscMobileCtrl.text.replaceAll(RegExp(r'\D'), '');
+    setState(() {
+      fetchingUsc = true;
+      uscErr = false;
+      uscMsg = withCaptcha
+          ? 'Verifying security code with ${s.discom.name}...'
+          : 'Connecting to ${s.discom.name} portal...';
+    });
+
+    final res = await BackendService.fetchUscBill(
+      rawBaseUrl: s.prefs.backendUrl,
+      usc: clean,
+      stateId: s.prefs.stateId,
+      discomId: s.discom.id,
+      category: s.prefs.category,
+      portalUrl: s.discom.url,
+      captchaId: withCaptcha ? uscCaptcha?.captchaId : null,
+      captchaAnswer: withCaptcha ? captchaCtrl.text.trim() : null,
+      mobileNumber: cleanMobile.length == 10 ? cleanMobile : null,
+    );
+
+    if (!mounted) return;
+    if (res.needsCaptcha) {
+      setState(() {
+        fetchingUsc = false;
+        uscErr = false;
+        uscCaptcha = res.captchaChallenge;
+        uscNeedsMobile = false;
+        captchaCtrl.clear();
+        uscMsg = res.message ?? res.captchaChallenge?.hint ?? 'Enter the security code shown below to fetch your live bill.';
+      });
+      return;
+    }
+
+    if (res.needsMobile) {
+      setState(() {
+        fetchingUsc = false;
+        uscErr = false;
+        uscCaptcha = null;
+        uscNeedsMobile = true;
+        uscMsg = res.message ?? 'Enter the 10-digit mobile number linked to this service number and tap Fetch.';
+      });
+      return;
+    }
+
+    if (res.ok) {
+      final metaParts = <String>[
+        if (res.contractedLoadKw != null && res.contractedLoadKw! > 0) '${res.contractedLoadKw!.toStringAsFixed(1)} kW Load',
+        if (res.phaseType.isNotEmpty) res.phaseType.replaceAll('_', ' '),
+        if (res.billDate.isNotEmpty) 'Bill: ${res.billDate}',
+      ];
+      setState(() {
+        fetchingUsc = false;
+        uscErr = false;
+        uscCaptcha = null;
+        uscNeedsMobile = false;
+        captchaCtrl.clear();
+        uscMonths = res.history;
+        uscMeta = metaParts.join(' · ');
+        uscEbillUrl = res.ebillUrl;
+        if (res.avgMonthlyUnits > 0) {
+          mode = 'units';
+          units.text = res.avgMonthlyUnits.round().toString();
+        } else if (res.avgMonthlyBill > 0) {
+          mode = 'bill';
+          bill.text = res.avgMonthlyBill.round().toString();
+        }
+        if (res.consumerName.isNotEmpty) name.text = res.consumerName;
+        if (res.address.isNotEmpty) address.text = res.address;
+        final verifiedCount = res.history.where((m) => m.verified).length;
+        uscMsg = 'Synced ${res.history.isNotEmpty ? '${res.history.length} months' : 'live bill'}'
+            '${verifiedCount > 0 ? ' ($verifiedCount verified)' : ''} · '
+            'Avg ${res.avgMonthlyUnits.round()} kWh/mo'
+            '${res.consumerName.isNotEmpty ? ' · ${res.consumerName}' : ''}';
+      });
+      s.addUscHistory(UscHistoryItem(
+        usc: clean,
+        stateId: s.prefs.stateId,
+        discomName: s.discom.name,
+        consumerName: res.consumerName,
+        avgMonthlyUnits: res.avgMonthlyUnits,
+        savedAt: DateTime.now().millisecondsSinceEpoch,
+      ));
+    } else {
+      setState(() {
+        fetchingUsc = false;
+        uscErr = true;
+        uscCaptcha = res.captchaChallenge;
+        uscMeta = '';
+        uscEbillUrl = '';
+        uscMsg = res.error ?? res.message ?? 'Could not fetch bill.';
+      });
+    }
+  }
+
+  Future<void> _syncLiveTariff() async {
+    setState(() => syncingTariff = true);
+    final res = await BackendService.fetchRealtimeTariff(
+      rawBaseUrl: s.prefs.backendUrl,
+      stateId: s.prefs.stateId,
+      discomId: s.prefs.discomId,
+      category: s.prefs.category,
+      monthlyUnits: _monthlyUnits > 0 ? _monthlyUnits : 400,
+    );
+    if (!mounted) return;
+    setState(() => syncingTariff = false);
+    if (res.ok && res.rate != null) {
+      setState(() => tariffOverride.text = res.rate!.toStringAsFixed(2));
+      toast(context, 'Live tariff synced: ₹${res.rate!.toStringAsFixed(2)}/kWh');
+    } else {
+      toast(context, 'Using official ${s.st.name('en')} slab table (${s.st.order})');
+    }
   }
 
   void _save() {
@@ -238,10 +435,12 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   Future<void> _open(String url) async {
+    if (url.isEmpty) return;
     await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
   void _load(SavedRecord r) {
+    uscCtrl.text = r.customer.usc;
     name.text = r.customer.name;
     phone.text = r.customer.phone;
     address.text = r.customer.address;
@@ -444,7 +643,239 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final plan = s.tariffCat;
     final u = _monthlyUnits;
     final quick = u > 0 ? _options(u)[SysType.onGrid] : null;
+    final book = s.book;
+    final activeRate = _activeRate(u);
+
     return [
+      // Collapsible 4-State Live USC / DISCOM Bill Fetch Panel
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          InkWell(
+            onTap: () => setState(() => uscOpen = !uscOpen),
+            child: Row(children: [
+              Container(width: 38, height: 38, decoration: BoxDecoration(color: C.chipBlue, shape: BoxShape.circle), child: Icon(Icons.electric_meter_outlined, color: C.sky, size: 20)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('USC / DISCOM Live Bill Fetch', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  Text('${s.st.name('en')} · ${s.discom.name} (Auto-fill 12-mo units)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 12)),
+                ]),
+              ),
+              Icon(uscOpen ? Icons.expand_less : Icons.expand_more, color: C.mute),
+            ]),
+          ),
+          if (uscOpen) ...[
+            const SizedBox(height: 12),
+            if (book != null) ...[
+              Row(children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('est_st_${s.prefs.stateId}'),
+                    initialValue: s.prefs.stateId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'State', isDense: true),
+                    items: [for (final x in book.states) DropdownMenuItem(value: x.id, child: Text(x.name('en'), overflow: TextOverflow.ellipsis))],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      s.chooseState(v);
+                      s.savePrefs();
+                      setState(() {
+                        uscCaptcha = null;
+                        uscNeedsMobile = false;
+                        uscMsg = '';
+                        uscMeta = '';
+                        uscEbillUrl = '';
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('est_dc_${s.prefs.stateId}_${s.prefs.discomId}'),
+                    initialValue: s.discom.id,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'DISCOM', isDense: true),
+                    items: [for (final d in s.st.discoms) DropdownMenuItem(value: d.id, child: Text(d.name, overflow: TextOverflow.ellipsis))],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      s.prefs.discomId = v;
+                      s.savePrefs();
+                      setState(() {
+                        uscCaptcha = null;
+                        uscNeedsMobile = false;
+                        uscMsg = '';
+                        uscMeta = '';
+                        uscEbillUrl = '';
+                      });
+                    },
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 10),
+            ],
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: uscCtrl,
+                  onSubmitted: (_) => _fetchUsc(),
+                  decoration: const InputDecoration(labelText: 'USC / Service Number', hintText: 'e.g. 102938475', isDense: true),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: fetchingUsc ? null : () => _fetchUsc(),
+                style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.blue),
+                child: Text(fetchingUsc ? '...' : 'Fetch', style: const TextStyle(fontWeight: FontWeight.w800)),
+              ),
+            ]),
+            if (uscCaptcha != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: C.chipBlue,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: C.blue.withValues(alpha: .4)),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Icon(Icons.verified_user_outlined, color: C.blue, size: 17),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${uscCaptcha!.provider} Portal Security Check',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: uscRefreshingCaptcha ? null : _refreshCaptcha,
+                      icon: const Icon(Icons.refresh, size: 15),
+                      label: Text(uscRefreshingCaptcha ? 'Loading...' : 'New Code', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                    ),
+                  ]),
+                  if (uscCaptcha!.imageBytes != null) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: C.line),
+                      ),
+                      child: Image.memory(uscCaptcha!.imageBytes!, height: 46, fit: BoxFit.contain),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: captchaCtrl,
+                        onSubmitted: (_) => _fetchUsc(withCaptcha: true),
+                        decoration: const InputDecoration(
+                          labelText: 'Security Code',
+                          hintText: 'Type code shown above',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: fetchingUsc ? null : () => _fetchUsc(withCaptcha: true),
+                      style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.green),
+                      child: Text(fetchingUsc ? '...' : 'Verify', style: const TextStyle(fontWeight: FontWeight.w800)),
+                    ),
+                  ]),
+                ]),
+              ),
+            ],
+            if (uscNeedsMobile || s.discom.id == 'apspdcl') ...[
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: uscMobileCtrl,
+                    keyboardType: TextInputType.phone,
+                    maxLength: 10,
+                    decoration: InputDecoration(
+                      labelText: uscNeedsMobile ? 'Linked 10-Digit Mobile (Required)' : 'Linked 10-Digit Mobile (Optional for APSPDCL)',
+                      hintText: '10-digit mobile linked to USC',
+                      counterText: '',
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                if (uscNeedsMobile) ...[
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: fetchingUsc ? null : () => _fetchUsc(),
+                    style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.orange),
+                    child: const Text('Submit', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ]),
+            ],
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              OutlinedButton.icon(
+                onPressed: () => _open(s.discom.url),
+                icon: const Icon(Icons.open_in_new, size: 15),
+                label: Text('Open ${s.discom.name} Portal', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+              ),
+              if (uscEbillUrl.isNotEmpty)
+                OutlinedButton.icon(
+                  onPressed: () => _open(uscEbillUrl),
+                  icon: const Icon(Icons.receipt_long_outlined, size: 15),
+                  label: const Text('Official e-Bill', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                ),
+              for (final h in s.uscHistory.take(3))
+                ActionChip(
+                  label: Text('${h.usc} (${h.avgMonthlyUnits.round()} U)', style: const TextStyle(fontSize: 12)),
+                  onPressed: () => setState(() {
+                    uscCtrl.text = h.usc;
+                    if (h.avgMonthlyUnits > 0) {
+                      mode = 'units';
+                      units.text = h.avgMonthlyUnits.round().toString();
+                    }
+                    if (h.consumerName.isNotEmpty) name.text = h.consumerName;
+                  }),
+                ),
+            ]),
+            if (uscMsg.isNotEmpty)
+              _note(
+                uscErr ? Icons.info_outline : (uscCaptcha != null || uscNeedsMobile ? Icons.verified_user_outlined : Icons.check_circle_outline),
+                uscErr ? C.amber : (uscCaptcha != null || uscNeedsMobile ? C.blue : C.green),
+                uscMeta.isNotEmpty && !uscErr ? '$uscMsg\n$uscMeta' : uscMsg,
+              ),
+            if (uscMonths.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 58,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final m in uscMonths.take(12))
+                      Container(
+                        margin: const EdgeInsets.only(right: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: m.verified ? C.green.withValues(alpha: .08) : C.card2,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: m.verified ? C.green.withValues(alpha: .45) : C.line),
+                        ),
+                        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Text(m.month, style: TextStyle(color: C.mute, fontSize: 10.5, fontWeight: FontWeight.w700)),
+                          Text('${m.units.round()} U', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                        ]),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ]),
+      ),
+      _gap(),
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter your monthly units or a bill amount'),
@@ -466,7 +897,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('${s.st.name('en').split(' ').first.toUpperCase()} · ${plan.slabLabel(u)}', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 4),
-                Text('${u.round()} kWh → ₹${groupIndian(plan.bill(u))}/mo (₹${plan.average(u).toStringAsFixed(2)}/kWh avg)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                Text('${u.round()} kWh → ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo (₹${(_num(tariffOverride) > 0 ? _num(tariffOverride) : plan.average(u)).toStringAsFixed(2)}/kWh avg)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
                 if (quick != null) ...[
                   const SizedBox(height: 4),
                   Text('Suggested: ${quick.kwp.toStringAsFixed(2)} kWp (${quick.panels} × ${_panel.wp}W)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 14)),
@@ -483,26 +914,24 @@ class _EstimatorPageState extends State<EstimatorPage> {
               ]),
             ),
           ],
-          ...[
-            const SizedBox(height: 12),
-            Row(children: [
-              for (final q in const [250, 400, 600])
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => setState(() {
-                      mode = 'units';
-                      units.text = '$q';
-                    }),
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                      decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-                      child: FittedBox(fit: BoxFit.scaleDown, child: Text('$q U (₹${groupIndian(plan.bill(q.toDouble()))})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
-                    ),
+          const SizedBox(height: 12),
+          Row(children: [
+            for (final q in const [250, 400, 600])
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    mode = 'units';
+                    units.text = '$q';
+                  }),
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
+                    child: FittedBox(fit: BoxFit.scaleDown, child: Text('$q U (₹${groupIndian(plan.bill(q.toDouble()))})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
                   ),
                 ),
-            ]),
-          ],
+              ),
+          ]),
           if (mode == 'units') ...[
             const SizedBox(height: 10),
             InkWell(
@@ -528,14 +957,25 @@ class _EstimatorPageState extends State<EstimatorPage> {
             Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text(s.discom.name, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
           ]),
           const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.line)),
-            child: Text(u > 0 ? plan.marginal(u).toStringAsFixed(2) : s.unitPrice.toStringAsFixed(2), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-          ),
+          Row(children: [
+            Expanded(
+              child: _field(
+                tariffOverride,
+                'Custom ₹/kWh (blank = auto ${activeRate.toStringAsFixed(2)})',
+                hint: activeRate.toStringAsFixed(2),
+                prefix: '₹ ',
+              ),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+              onPressed: syncingTariff ? null : _syncLiveTariff,
+              icon: const Icon(Icons.sync, size: 17),
+              label: Text(syncingTariff ? '...' : 'Sync', style: const TextStyle(fontWeight: FontWeight.w800)),
+              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), foregroundColor: C.green, side: BorderSide(color: C.green.withValues(alpha: .6))),
+            ),
+          ]),
           const SizedBox(height: 6),
-          Text('${s.st.order}. Effective ${s.st.effective}. Energy charges only. Change state or category in Settings.', style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
+          Text('${s.st.order}. Effective ${s.st.effective}. Auto slab: ₹${(u > 0 ? plan.marginal(u) : s.unitPrice).toStringAsFixed(2)}/kWh.', style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
           _gap(),
           Text('Roof Area in Square Meters (Optional)', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 13)),
           const SizedBox(height: 8),
@@ -581,7 +1021,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
             Row(children: [
               Icon(Icons.check_circle_outline, color: C.green, size: 19),
               const SizedBox(width: 6),
-              Expanded(child: Text('Analyzed Usage: ${u.round()} kWh · ₹${groupIndian(plan.bill(u))}/mo', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
+              Expanded(child: Text('Analyzed Usage: ${u.round()} kWh · ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
               Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
             ])
           else
@@ -594,9 +1034,21 @@ class _EstimatorPageState extends State<EstimatorPage> {
           ]),
           const SizedBox(height: 10),
           Row(children: [
-            _chip('Residential', category == 'residential', () => setState(() => category = 'residential'), sub: 'Open Capex'),
-            _chip('Commercial', category == 'commercial', () => setState(() => category = 'commercial'), sub: 'Lower Cost'),
-            _chip('Industrial', category == 'industrial', () => setState(() => category = 'industrial'), sub: 'Plant'),
+            _chip('Residential', category == 'residential', () {
+              setState(() => category = 'residential');
+              s.prefs.category = 'domestic';
+              s.savePrefs();
+            }, sub: 'Open Capex'),
+            _chip('Commercial', category == 'commercial', () {
+              setState(() => category = 'commercial');
+              s.prefs.category = 'commercial';
+              s.savePrefs();
+            }, sub: 'Lower Cost'),
+            _chip('Industrial', category == 'industrial', () {
+              setState(() => category = 'industrial');
+              s.prefs.category = 'industrial';
+              s.savePrefs();
+            }, sub: 'Plant'),
             _chip('Agricultural', category == 'agricultural', () => setState(() => category = 'agricultural'), sub: 'Pumps'),
           ]),
           _gap(),
@@ -694,6 +1146,8 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final battery = o.batteryKwh * rates.battery;
     final pv = o.gross - extra.roundToDouble() - battery.roundToDouble();
     final models = panelsFor(dcr);
+    final bom = buildBom(o, dcr: dcr, profile: _profile, rates: s.rates);
+    final bomFiltered = bom.items.where((x) => x.tab == bomTab).toList();
     final roofSqm = _num(roof);
     final warns = <String>[];
     if (roofSqm > 0 && r.roofSqm > roofSqm) warns.add('This system needs about ${r.roofSqm.round()} sq m of roof but you entered ${roofSqm.round()} sq m. Reduce the system or check the roof.');
@@ -705,6 +1159,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     if (r.paybackYears == null || r.paybackYears! > 12) {
       warns.add(r.paybackYears == null ? 'This system does not pay back within ${r.years} years at this usage. Check the units entered or try On-Grid.' : 'Payback is ${r.paybackYears!.toStringAsFixed(1)} years. Low usage or battery cost stretches it. On-Grid is usually quickest.');
     }
+
     return [
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -894,6 +1349,56 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+      // Bill of Materials (BOM) & Interlink Breakdown inside Estimator Results
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          InkWell(
+            onTap: () => setState(() => bomOpen = !bomOpen),
+            child: Row(children: [
+              Icon(Icons.inventory_2_outlined, color: C.sky, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Required Parts & BOM (${bom.items.length} items)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  Text('${o.type.label} · ${dcr ? 'DCR ALMM' : 'Non-DCR'} · ${o.threePhase ? '3-Phase' : '1-Phase'}', style: TextStyle(color: C.mute, fontSize: 12)),
+                ]),
+              ),
+              if (bom.removed.isNotEmpty)
+                Container(
+                  margin: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)),
+                  child: Text('${bom.removed.length} Filtered', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11)),
+                ),
+              Icon(bomOpen ? Icons.expand_less : Icons.expand_more, color: C.mute),
+            ]),
+          ),
+          if (bomOpen) ...[
+            const SizedBox(height: 10),
+            Row(children: [
+              _chip('PV & Inv', bomTab == 0, () => setState(() => bomTab = 0)),
+              _chip('BOS & Str', bomTab == 1, () => setState(() => bomTab = 1)),
+              _chip('Metering', bomTab == 2, () => setState(() => bomTab = 2)),
+            ]),
+            const SizedBox(height: 10),
+            for (final item in bomFiltered)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(12), border: Border.all(color: C.line)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text(item.title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5))),
+                    Text(rupee(item.price), style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 13)),
+                  ]),
+                  const SizedBox(height: 2),
+                  Text('${item.qty} · ${item.spec}', style: TextStyle(color: C.mute, fontSize: 11.5)),
+                ]),
+              ),
+          ],
+        ]),
+      ),
+      _gap(),
       _bigButton('ROI Dashboard', () => setState(() => stage = 2), icon: Icons.trending_up),
       const SizedBox(height: 10),
       Row(children: [
@@ -912,7 +1417,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     return [
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Investment Payback Period', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+          const Text('Investment Payback Period', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
           Text('${r.years}-year break-even & financial return model', style: TextStyle(color: C.mute, fontSize: 12.5)),
           _gap(10),
           Container(
@@ -1090,6 +1595,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final expected = kwp * y * 30;
     final pr = expected > 0 && act > 0 ? act / expected * 100 : 0.0;
     final ratio = inv > 0 ? kwp / inv : 0.0;
+    final snap = s.inverterSnap;
     DateTime? lastWash;
     for (final e in s.services) {
       if (e.type == ServiceType.cleaning && (lastWash == null || e.date.isAfter(lastWash))) lastWash = e.date;
@@ -1125,6 +1631,24 @@ class _EstimatorPageState extends State<EstimatorPage> {
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _title(Icons.health_and_safety_outlined, C.blue, 'Installed Equipment Specifications', 'Describe the plant to audit its performance'),
+          if (snap != null) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () {
+                setState(() {
+                  final rated = snap.ratedKw > 0 ? snap.ratedKw : s.site.kwp;
+                  final panelW = _num(exWp) > 0 ? _num(exWp) : 550.0;
+                  exQty.text = (rated * 1000 / panelW).round().toString();
+                  exInv.text = rated.toStringAsFixed(1);
+                  final mo = snap.monthKwh > 0 ? snap.monthKwh : snap.todayKwh * 30;
+                  if (mo > 0) exGen.text = mo.round().toString();
+                });
+                toast(context, 'Loaded live inverter metrics into audit.');
+              },
+              icon: const Icon(Icons.electric_bolt, size: 17),
+              label: Text('Load from Connected Inverter (${snap.brand.toUpperCase()})', style: const TextStyle(fontWeight: FontWeight.w800)),
+            ),
+          ],
           _gap(),
           Row(children: [
             Expanded(child: _field(exWp, 'Panel wattage', suffix: 'W')),
@@ -1185,24 +1709,44 @@ class _EstimatorPageState extends State<EstimatorPage> {
     ];
   }
 
-  // ---------- Generation ----------
+  // ---------- Standalone Generation Calculator ----------
   List<Widget> _generation() {
     final r = s.result;
-    if (r == null) {
-      return [
-        Panel(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _title(Icons.flash_on, C.green, 'Power Generation & Yield', 'Run a New Install calculation first'),
-            _gap(10),
-            FilledButton(onPressed: () => setState(() => tab = 0), style: FilledButton.styleFrom(backgroundColor: C.orange), child: const Text('Go to New Install', style: TextStyle(fontWeight: FontWeight.w800))),
-          ]),
-        ),
-      ];
-    }
-    final tariff = s.input.tariff;
-    final flow = energyFlow(monthlyGen: r.monthlyGen, monthlyUse: r.monthlyUnits, tariff: tariff, exportRate: s.st.exportRate);
-    final cover = r.monthlyUnits > 0 ? (flow.selfUse / r.monthlyUnits * 100).round() : 0;
+    final kw = _num(genKw) > 0 ? _num(genKw) : (r?.kw ?? s.site.kwp);
+    final use = _num(genUse) > 0 ? _num(genUse) : (r?.monthlyUnits ?? 400.0);
+    final tariff = _num(genTariff) > 0 ? _num(genTariff) : (r != null ? s.input.tariff : s.unitPrice);
+    final y = s.locationYield;
+    final dailyGen = kw * y;
+    final annualGen = dailyGen * 365;
+    final monthlyGen = annualGen / 12;
+
+    final flow = energyFlow(monthlyGen: monthlyGen, monthlyUse: use, tariff: tariff, exportRate: s.st.exportRate);
+    final cover = use > 0 ? (flow.selfUse / use * 100).round() : 0;
+
     return [
+      Panel(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _title(Icons.flash_on, C.green, 'Power Generation & Yield Calculator', '${s.site.city} · ${y.toStringAsFixed(2)} kWh/kWp/day location yield'),
+          _gap(12),
+          Row(children: [
+            Expanded(child: _field(genKw, 'System size', suffix: 'kW')),
+            const SizedBox(width: 10),
+            Expanded(child: _field(genUse, 'Monthly usage', suffix: 'kWh')),
+          ]),
+          const SizedBox(height: 10),
+          _field(genTariff, 'Tariff rate (blank = ₹${tariff.toStringAsFixed(2)})', prefix: '₹ ', suffix: '/kWh'),
+          const SizedBox(height: 8),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final preset in const [1.0, 2.0, 3.0, 5.0, 10.0])
+              ChoiceChip(
+                label: Text('${_t(preset)} kW', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                selected: (kw - preset).abs() < 0.05,
+                onSelected: (_) => setState(() => genKw.text = _t(preset)),
+              ),
+          ]),
+        ]),
+      ),
+      _gap(),
       Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(26), gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF0F9B8E), Color(0xFF0B6E8A)])),
@@ -1211,18 +1755,18 @@ class _EstimatorPageState extends State<EstimatorPage> {
             const Icon(Icons.flash_on, color: Colors.white, size: 18),
             const SizedBox(width: 6),
             const Expanded(child: Text('ESTIMATED POWER GENERATION', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12.5, letterSpacing: .4))),
-            Text('${_t(double.parse(r.kw.toStringAsFixed(2)))} kW System', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text('${_t(double.parse(kw.toStringAsFixed(2)))} kW System', style: const TextStyle(color: Colors.white70, fontSize: 12)),
           ]),
           const SizedBox(height: 8),
           Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-            Text(groupIndian(r.monthlyGen), style: const TextStyle(color: Colors.white, fontSize: 44, fontWeight: FontWeight.w800)),
+            Text(groupIndian(monthlyGen), style: const TextStyle(color: Colors.white, fontSize: 44, fontWeight: FontWeight.w800)),
             const SizedBox(width: 8),
             const Text('kWh / Month', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700)),
           ]),
           const Divider(color: Colors.white24),
           Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Daily Generation', style: TextStyle(color: Colors.white70, fontSize: 11.5)), Text('${(r.gen1 / 365).toStringAsFixed(1)} kWh/day', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))])),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Annual Energy Output', style: TextStyle(color: Colors.white70, fontSize: 11.5)), Text('${groupIndian(r.gen1)} kWh/yr', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Daily Generation', style: TextStyle(color: Colors.white70, fontSize: 11.5)), Text('${dailyGen.toStringAsFixed(1)} kWh/day', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))])),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Annual Energy Output', style: TextStyle(color: Colors.white70, fontSize: 11.5)), Text('${groupIndian(annualGen)} kWh/yr', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))])),
           ]),
         ]),
       ),
@@ -1256,7 +1800,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
     ];
   }
 
-
   List<Widget> _saved() {
     final s = widget.state;
     final q = search.text.trim();
@@ -1265,13 +1808,13 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ? s.records
         : s.records.where((r) {
             final c = r.customer;
-            return [c.name, c.phone, c.address].any((x) => x.toLowerCase().contains(ql));
+            return [c.usc, c.name, c.phone, c.address].any((x) => x.toLowerCase().contains(ql));
           }).toList();
     return [
       TextField(
         controller: search,
         onChanged: (_) => setState(() {}),
-        decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search by name, phone or address'),
+        decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search by USC, name, phone or address'),
       ),
       const SizedBox(height: 12),
       if (rows.isEmpty)
@@ -1300,7 +1843,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(c.name.isEmpty ? 'Unnamed customer' : c.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
           const SizedBox(height: 2),
-          Text('${c.phone.isEmpty ? 'No phone' : c.phone}${c.address.isEmpty ? '' : '\n${c.address}'}', style: TextStyle(color: C.mute, fontSize: 12.5)),
+          Text('${c.usc.isEmpty ? '' : 'USC ${c.usc} · '}${c.phone.isEmpty ? 'No phone' : c.phone}${c.address.isEmpty ? '' : '\n${c.address}'}', style: TextStyle(color: C.mute, fontSize: 12.5)),
           const SizedBox(height: 8),
           Text('${fmt1(r.kw)} kW · ${r.panels} panels · Net ${inr(r.netCost)} · Payback ${r.paybackYears == null ? '-' : '${fmt1(r.paybackYears!)} yrs'}', style: const TextStyle(fontSize: 13.5)),
           const SizedBox(height: 10),
@@ -1347,10 +1890,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
   Future<void> _copyCsv(AppState s) async {
     String q(String v) => '"${v.replaceAll('"', '""')}"';
-    final lines = <String>[['Name', 'Phone', 'Address', 'kW', 'Panels', 'Net cost (Rs)', 'Payback (yrs)'].map(q).join(',')];
+    final lines = <String>[['USC', 'Name', 'Phone', 'Address', 'kW', 'Panels', 'Net cost (Rs)', 'Payback (yrs)'].map(q).join(',')];
     for (final rec in s.records) {
       final r = rec.result;
       lines.add([
+        rec.customer.usc,
         rec.customer.name,
         rec.customer.phone,
         rec.customer.address,

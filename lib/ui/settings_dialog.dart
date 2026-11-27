@@ -236,7 +236,7 @@ class _SettingsDialogState extends State<_SettingsDialog> with SingleTickerProvi
           title: 'Live API Server (Optional)',
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text(
-              'Optional Render / Cloud Run URL for live 4-state USC bill fetch, real-time tariff sync & manufacturer inverter login.',
+              'Optional Render / Cloud Run URL. Live USC bill fetch works directly on Android/iOS without a server; only needed for Web or manufacturer website inverter login.',
               style: TextStyle(color: C.mute, fontSize: 12.5),
             ),
             const SizedBox(height: 8),

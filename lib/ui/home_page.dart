@@ -5,6 +5,7 @@ import '../core/calc.dart';
 import '../core/i18n.dart';
 import '../core/store.dart';
 import '../core/sun.dart';
+import 'connect_sheet.dart';
 import 'location_sheet.dart';
 import 'profile_dialog.dart';
 import 'settings_dialog.dart';
@@ -157,6 +158,9 @@ class _HomePageState extends State<HomePage> {
             _Avatar(s.profile.name, () => showProfileDialog(context, s)),
           ]),
         ),
+        // ---------- connect inverter, logger and bill ----------
+        const ConnectCard(),
+        const SizedBox(height: 12),
         // ---------- date + live clock ----------
         Panel(
           radius: 22,

@@ -162,12 +162,14 @@ class _UscSectionState extends State<UscSection> {
       if (req.refetch) {
         result = null;
         captcha.clear();
-        notice = 'Type the ${r.discom.code} captcha and tap Fetch to refresh.';
+        notice = null;
       } else {
         result = r;
         notice = null;
       }
     });
+    // A history tap re-runs the fetch at once. If the DISCOM needs a captcha, the fetch shows it.
+    if (req.refetch) _fetch();
   }
 
   /// Matches the typed number to a DISCOM by its confirmed length rule.
@@ -884,7 +886,10 @@ class UscHistory extends StatelessWidget {
   Widget _item(BuildContext context, UscRecord s, List<UscRecord> saved) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: Panel(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => onOpen(UscLoad(s, refetch: true)),
+        child: Panel(
         radius: 16,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -925,6 +930,7 @@ class UscHistory extends StatelessWidget {
             ),
           ]),
         ]),
+      ),
       ),
     );
   }

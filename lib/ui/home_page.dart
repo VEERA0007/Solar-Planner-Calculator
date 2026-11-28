@@ -637,6 +637,16 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// Makes a past inverter account the active one, shows its last data, and syncs it.
+  Future<void> _useInverterLogin(AppState s, InverterLoginItem e) async {
+    if (e.cfg != null) s.inverterCfg = e.cfg!;
+    s.inverterSnap = e.snap;
+    s.saveInverter();
+    setState(() {});
+    await showInverterSyncDialog(context, s, autoSync: true);
+    if (mounted) setState(() {});
+  }
+
   /// Inverter login attempts, newest first. Passwords are never stored.
   Widget _inverterLoginHistory(AppState s) {
     final items = s.inverterLogins.take(10).toList();
@@ -655,7 +665,10 @@ class _HomePageState extends State<HomePage> {
           for (final e in items)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _useInverterLogin(s, e),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Icon(e.ok ? Icons.check_circle_outline : Icons.error_outline, color: e.ok ? C.green : C.red, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
@@ -667,6 +680,7 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(width: 8),
                 Text('${_two(e.at.day)}/${_two(e.at.month)} ${_two(e.at.hour)}:${_two(e.at.minute)}', style: TextStyle(color: C.mute, fontSize: 11)),
               ]),
+              ),
             ),
       ]),
     );

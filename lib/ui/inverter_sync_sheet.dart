@@ -10,12 +10,14 @@ import 'widgets.dart';
 /// 2-Option Inverter Integration Dialog:
 /// 1. Manufacturer Website Login (enter portal credentials)
 /// 2. API Integration (API Key/Secret or custom HTTPS JSON endpoint)
-Future<void> showInverterSyncDialog(BuildContext context, AppState s) =>
-    showDialog<void>(context: context, builder: (_) => _InverterSyncDialog(state: s));
+/// [autoSync]: sync at once with the saved account, when no secret needs typing.
+Future<void> showInverterSyncDialog(BuildContext context, AppState s, {bool autoSync = false}) =>
+    showDialog<void>(context: context, builder: (_) => _InverterSyncDialog(state: s, autoSync: autoSync));
 
 class _InverterSyncDialog extends StatefulWidget {
   final AppState state;
-  const _InverterSyncDialog({required this.state});
+  final bool autoSync;
+  const _InverterSyncDialog({required this.state, this.autoSync = false});
   @override
   State<_InverterSyncDialog> createState() => _InverterSyncDialogState();
 }
@@ -44,6 +46,30 @@ class _InverterSyncDialogState extends State<_InverterSyncDialog> {
     stationId = TextEditingController(text: c.stationId);
     loggerSn = TextEditingController(text: c.loggerSerial);
     customUrl = TextEditingController(text: c.customEndpoint);
+    if (widget.autoSync) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _autoSync();
+      });
+    }
+  }
+
+  /// Runs the sync at once when the saved account needs no typed secret. Otherwise asks for it.
+  void _autoSync() {
+    if (authMode == 'website' && password.text.isEmpty) {
+      setState(() {
+        statusError = false;
+        statusMsg = 'Enter the password for ${username.text} to sync.';
+      });
+      return;
+    }
+    if (authMode == 'api' && customUrl.text.trim().isEmpty && (apiKey.text.trim().isEmpty || apiSecret.text.isEmpty)) {
+      setState(() {
+        statusError = false;
+        statusMsg = 'Enter the API secret to sync.';
+      });
+      return;
+    }
+    _syncNow();
   }
 
   @override
@@ -104,6 +130,8 @@ class _InverterSyncDialogState extends State<_InverterSyncDialog> {
       at: DateTime.now(),
       brand: _brandMeta.$2,
       authMode: authMode,
+      cfg: cfg,
+      snap: loggedOk ? res.snapshot : null,
       account: authMode == 'website'
           ? cfg.username
           : (cfg.customEndpoint.isNotEmpty ? 'Custom API' : InverterLoginItem.maskKey(cfg.apiKey)),

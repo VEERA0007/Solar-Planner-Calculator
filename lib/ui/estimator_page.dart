@@ -8,12 +8,9 @@ import '../core/estimator_data.dart';
 import '../core/service_data.dart';
 import '../core/store.dart';
 import '../core/tariff.dart';
-import '../core/usc.dart';
-import '../core/usc_direct.dart';
 import 'pdf_quote.dart';
 import 'roof_map.dart';
 import 'theme.dart';
-import 'usc_section.dart';
 
 /// Solar Estimator: New Install (with 4-state USC bill fetch, inline tariff/DISCOM
 /// selector, custom rate override, roof map, BOM, ROI & Customer page),
@@ -28,13 +25,13 @@ class EstimatorPage extends StatefulWidget {
 class _EstimatorPageState extends State<EstimatorPage> {
   int tab = 0; // 0 New Install, 1 Existing Plant, 2 Generation
   int stage = 0; // 0 form, 1 results, 2 ROI, 3 customer page, 4 saved
-  String mode = 'units'; // units | bill
+  String mode = 'units'; // units | bill | usc
   String category = 'residential';
   bool dcr = true;
   SysType sys = SysType.onGrid;
   int panelIdx = 1;
   bool custOpen = false;
-  bool uscOpen = false;
+  bool helperOpen = false;
   bool bomOpen = false;
   int bomTab = 0;
   double escalation = 3, omPct = 1;
@@ -51,14 +48,16 @@ class _EstimatorPageState extends State<EstimatorPage> {
   String uscMsg = '';
   String uscMeta = '';
   String uscEbillUrl = '';
+  String syncedUscNo = '';
+  String syncedUscDiscom = '';
   bool uscErr = false;
   UscCaptchaChallenge? uscCaptcha;
   List<UscMonthEntry> uscMonths = [];
 
   final units = TextEditingController(text: '400');
   final bill = TextEditingController();
+  final helperBillCtrl = TextEditingController();
   final uscCtrl = TextEditingController();
-  final _uscLink = UscLink();
   final captchaCtrl = TextEditingController();
   final uscMobileCtrl = TextEditingController();
   final uscPasteCtrl = TextEditingController();
@@ -96,9 +95,6 @@ class _EstimatorPageState extends State<EstimatorPage> {
     address.text = p.address;
     uscCtrl.text = p.serviceNo;
     _takePush();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _syncLiveTariff();
-    });
   }
 
   @override
@@ -107,32 +103,15 @@ class _EstimatorPageState extends State<EstimatorPage> {
     if (s.estimatePush != null) setState(_takePush);
   }
 
-  /// Copies a fetched USC record into the estimator: units or bill, customer name and address.
-  void _applyUsc(UscRecord r) {
-    setState(() {
-      uscCtrl.text = r.usc;
-      if (r.avgUnits > 0) {
-        mode = 'units';
-        units.text = r.avgUnits.round().toString();
-      } else if (r.avgBill > 0) {
-        mode = 'bill';
-        bill.text = r.avgBill.round().toString();
-      }
-      if (r.consumerName.isNotEmpty) name.text = r.consumerName;
-      if (r.address.isNotEmpty) address.text = r.address;
-    });
-  }
-
   @override
   void dispose() {
     for (final c in [
-      units, bill, uscCtrl, captchaCtrl, uscMobileCtrl, uscPasteCtrl, tariffOverride, roof, backup, inverterBrand,
+      units, bill, helperBillCtrl, uscCtrl, captchaCtrl, uscMobileCtrl, uscPasteCtrl, tariffOverride, roof, backup, inverterBrand,
       name, phone, address, search, exWp, exQty, exInv, exGen, customCost,
       genKw, genUse, genTariff,
     ]) {
       c.dispose();
     }
-    _uscLink.dispose();
     super.dispose();
   }
 
@@ -394,11 +373,15 @@ class _EstimatorPageState extends State<EstimatorPage> {
         uscMonths = res.history;
         uscMeta = metaParts.join(' · ');
         uscEbillUrl = res.ebillUrl;
+        syncedUscNo = clean;
+        syncedUscDiscom = s.discom.name;
         if (res.avgMonthlyUnits > 0) {
-          mode = 'units';
           units.text = res.avgMonthlyUnits.round().toString();
+          final estBill = _num(tariffOverride) > 0
+              ? res.avgMonthlyUnits * _num(tariffOverride)
+              : s.tariffCat.bill(res.avgMonthlyUnits);
+          bill.text = estBill.round().toString();
         } else if (res.avgMonthlyBill > 0) {
-          mode = 'bill';
           bill.text = res.avgMonthlyBill.round().toString();
         }
         if (res.consumerName.isNotEmpty) name.text = res.consumerName;
@@ -429,9 +412,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     }
   }
 
-  /// Rate is set by the DISCOM sync, never typed by the user. Quiet on failure: the official slab table is used.
   Future<void> _syncLiveTariff() async {
-    if (syncingTariff) return;
     setState(() => syncingTariff = true);
     final res = await BackendService.fetchRealtimeTariff(
       rawBaseUrl: s.prefs.backendUrl,
@@ -444,8 +425,9 @@ class _EstimatorPageState extends State<EstimatorPage> {
     setState(() => syncingTariff = false);
     if (res.ok && res.rate != null) {
       setState(() => tariffOverride.text = res.rate!.toStringAsFixed(2));
+      toast(context, 'Live tariff synced: ₹${res.rate!.toStringAsFixed(2)}/kWh');
     } else {
-      setState(() => tariffOverride.text = '');
+      toast(context, 'Using official ${s.st.name('en')} slab table (${s.st.order})');
     }
   }
 
@@ -590,6 +572,179 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       );
 
+  String _shortInr(double amt) {
+    if (amt >= 1000) {
+      final k = (amt / 1000).toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
+      return '₹${k}k';
+    }
+    return '₹${amt.round()}';
+  }
+
+  /// Sleek DCR / Non-DCR pill toggle switch matching the Web App DcrToggleSwitch.
+  Widget _dcrToggle({required bool isDcr, required ValueChanged<bool> onChanged}) {
+    const amberTrack = Color(0xFFF59E0B);
+    const activeAmberText = Color(0xFFD97706);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (!isDcr) onChanged(true);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          child: Text(
+            'DCR',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+              color: isDcr ? activeAmberText : C.mute,
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 7),
+      GestureDetector(
+        onTap: () => onChanged(!isDcr),
+        child: Container(
+          width: 44,
+          height: 24,
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: amberTrack,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: AnimatedAlign(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            alignment: isDcr ? Alignment.centerLeft : Alignment.centerRight,
+            child: Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .16), blurRadius: 3, offset: const Offset(0, 1))],
+              ),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 7),
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (isDcr) onChanged(false);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          child: Text(
+            'Non-DCR',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+              color: !isDcr ? activeAmberText : C.mute,
+            ),
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  void _showModuleGuideDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (d) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: Row(children: [
+          Icon(Icons.verified_user_outlined, color: C.amber, size: 22),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('DCR vs Non-DCR Guide', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(14)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('DCR (Subsidy Eligible)', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 13.5)),
+              const SizedBox(height: 4),
+              Text(
+                '100% Made-in-India cells & modules (ALMM). Eligible for PM Surya Ghar central subsidy up to ₹78,000 (~₹54k/kWp base).',
+                style: TextStyle(color: C.text, fontSize: 12.5, height: 1.35),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(14)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Non-DCR (Open Category)', style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 13.5)),
+              const SizedBox(height: 4),
+              Text(
+                'Tier-1 global modules with lower upfront cost (~₹42k/kWp base). Zero government subsidy; ideal for commercial or fast-track installs.',
+                style: TextStyle(color: C.text, fontSize: 12.5, height: 1.35),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          Text(subsidyNote(_profile, dcr, sys), style: TextStyle(color: C.mute, fontSize: 12, height: 1.35)),
+        ]),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(d),
+            style: FilledButton.styleFrom(backgroundColor: C.orange),
+            child: const Text('Got it', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _roundedNumberBox({
+    required TextEditingController controller,
+    required String hint,
+    String? prefix,
+    Widget? trailing,
+    bool highlightedGreen = false,
+    VoidCallback? onChanged,
+  }) =>
+      Container(
+        decoration: BoxDecoration(
+          color: highlightedGreen ? C.green.withValues(alpha: .07) : C.card2,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: highlightedGreen ? C.green.withValues(alpha: .45) : C.line),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+        child: Row(children: [
+          if (prefix != null) ...[
+            Text(prefix, style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 16)),
+            const SizedBox(width: 4),
+          ],
+          Expanded(
+            child: TextField(
+              controller: controller,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+              onChanged: (_) {
+                setState(() {});
+                onChanged?.call();
+              },
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: TextStyle(color: C.mute.withValues(alpha: .7), fontWeight: FontWeight.w600, fontSize: 14.5),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: false,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 11),
+              ),
+            ),
+          ),
+          if (trailing != null) ...[const SizedBox(width: 8), trailing],
+        ]),
+      );
+
   // ---------- page frame ----------
   @override
   Widget build(BuildContext context) {
@@ -605,48 +760,72 @@ class _EstimatorPageState extends State<EstimatorPage> {
         },
     };
     return Column(children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-        child: Row(children: [
-          IconButton(
-            onPressed: () {
-              if (tab == 0 && stage > 0) {
-                setState(() => stage = stage == 2 || stage == 3 ? 1 : 0);
-              } else {
-                s.setTab(0);
-              }
-            },
-            icon: const Icon(Icons.arrow_back),
-            visualDensity: VisualDensity.compact,
-            tooltip: 'Back',
-          ),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text('Solar Estimator', maxLines: 1, style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800))),
-              Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 12.5)),
-            ]),
-          ),
-          IconButton(
-            key: const ValueKey('saved-btn'),
-            onPressed: () => setState(() {
-              tab = 0;
-              stage = 4;
-            }),
-            tooltip: 'Saved estimates',
-            visualDensity: VisualDensity.compact,
-            icon: Badge(isLabelVisible: s.records.isNotEmpty, label: Text('${s.records.length}'), backgroundColor: C.orange, child: Icon(Icons.bookmark_border, color: C.text)),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            decoration: BoxDecoration(color: C.chip, borderRadius: BorderRadius.circular(14)),
-            child: Text('INR (₹)', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 12.5)),
-          ),
+      Container(
+        decoration: BoxDecoration(
+          color: C.card,
+          border: Border(bottom: BorderSide(color: C.line)),
+        ),
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        child: Column(children: [
+          Row(children: [
+            GestureDetector(
+              onTap: () {
+                if (tab == 0 && stage > 0) {
+                  setState(() => stage = stage == 2 || stage == 3 ? 1 : 0);
+                } else {
+                  s.setTab(0);
+                }
+              },
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(color: C.card2, shape: BoxShape.circle),
+                child: Icon(Icons.chevron_left, color: C.text, size: 22),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text('Solar Estimator', maxLines: 1, style: TextStyle(fontSize: 17.5, fontWeight: FontWeight.w800)),
+                ),
+                Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 11.5)),
+              ]),
+            ),
+            IconButton(
+              key: const ValueKey('saved-btn'),
+              onPressed: () => setState(() {
+                tab = 0;
+                stage = 4;
+              }),
+              tooltip: 'Saved estimates',
+              visualDensity: VisualDensity.compact,
+              icon: Badge(
+                isLabelVisible: s.records.isNotEmpty,
+                label: Text('${s.records.length}'),
+                backgroundColor: C.orange,
+                child: Icon(Icons.bookmark_border, color: C.text, size: 21),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: C.card2,
+                borderRadius: BorderRadius.circular(99),
+                border: Border.all(color: C.line),
+              ),
+              child: Text('INR (₹)', style: TextStyle(color: C.text, fontWeight: FontWeight.w800, fontSize: 11.5)),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          _tabs(),
         ]),
       ),
-      Padding(padding: const EdgeInsets.fromLTRB(14, 0, 14, 8), child: _tabs()),
       Expanded(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 24),
           children: switch (tab) {
             1 => _existing(),
             2 => _generation(),
@@ -664,18 +843,35 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   Widget _tabs() {
-    Widget t(int i, String a, String b) {
+    Widget t(int i, String a, String b, Color activeColor) {
       final on = tab == i;
       return Expanded(
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () => setState(() => tab = i),
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 9),
-            decoration: BoxDecoration(color: on ? C.card : Colors.transparent, borderRadius: BorderRadius.circular(16), border: on ? Border.all(color: C.line) : null),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            decoration: BoxDecoration(
+              color: on ? C.card : Colors.transparent,
+              borderRadius: BorderRadius.circular(13),
+              boxShadow: on
+                  ? [BoxShadow(color: Colors.black.withValues(alpha: .06), blurRadius: 4, offset: const Offset(0, 1))]
+                  : null,
+            ),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              FittedBox(fit: BoxFit.scaleDown, child: Text(a, maxLines: 1, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: on ? C.orange : C.text))),
-              FittedBox(fit: BoxFit.scaleDown, child: Text(b, maxLines: 1, style: TextStyle(fontSize: 11, color: on ? C.orange : C.mute))),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(a, maxLines: 1, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: on ? activeColor : C.mute)),
+              ),
+              const SizedBox(height: 1),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  b,
+                  maxLines: 1,
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: on ? activeColor.withValues(alpha: .88) : C.mute),
+                ),
+              ),
             ]),
           ),
         ),
@@ -684,238 +880,1075 @@ class _EstimatorPageState extends State<EstimatorPage> {
 
     return Container(
       padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(20), border: Border.all(color: C.line)),
-      child: Row(children: [t(0, 'New Install', dcr ? 'DCR' : 'Non-DCR'), t(1, 'Existing Plant', 'Audit & Health'), t(2, 'Generation', 'Yield & Export')]),
+      decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(16)),
+      child: Row(children: [
+        t(0, 'New Install', dcr ? 'DCR' : 'Non-DCR', C.orange),
+        t(1, 'Existing Plant', 'Audit & Health', C.sky),
+        t(2, 'Generation', 'Yield & Export', C.green),
+      ]),
     );
   }
 
-  // ---------- 1. form ----------
+  // ---------- 1. form (Unified Web-App Estimator Enquiry UI) ----------
   List<Widget> _form() {
     final plan = s.tariffCat;
     final u = _monthlyUnits;
     final quick = u > 0 ? _options(u)[SysType.onGrid] : null;
     final book = s.book;
     final activeRate = _activeRate(u);
+    final estBill = u > 0 ? (_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u)) : 0.0;
+    final effAvgRate = u > 0 ? (estBill / u) : activeRate;
+    final hasSyncedUsc = syncedUscNo.isNotEmpty;
+    final helperAmt = _num(helperBillCtrl);
+    final helperSolvedUnits = helperAmt > 0
+        ? (_num(tariffOverride) > 0 ? helperAmt / _num(tariffOverride) : plan.unitsForBill(helperAmt)).round()
+        : 0;
+    final applMonthly = s.monthlyUnits;
+
+    Widget modePill(String id, String label) {
+      final on = mode == id;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          setState(() {
+            if (id == 'bill' && mode != 'bill' && bill.text.trim().isEmpty && u > 0) {
+              bill.text = estBill.round().toString();
+            } else if (id == 'units' && mode == 'bill' && u > 0) {
+              units.text = u.round().toString();
+            }
+            mode = id;
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: on ? C.card : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: on
+                ? [BoxShadow(color: Colors.black.withValues(alpha: .06), blurRadius: 3, offset: const Offset(0, 1))]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: on ? (id == 'usc' ? C.orange : const Color(0xFFD97706)) : C.mute,
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget catTile(String id, String label, String sub, VoidCallback onTap) {
+      final on = category == id;
+      return Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
+            decoration: BoxDecoration(
+              color: on ? C.orange : C.card2,
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(color: on ? C.orange : C.line),
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(label, maxLines: 1, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: on ? Colors.white : C.text)),
+              ),
+              const SizedBox(height: 1),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(sub, maxLines: 1, style: TextStyle(fontSize: 9.8, fontWeight: FontWeight.w600, color: on ? Colors.white.withValues(alpha: .9) : C.mute)),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    Widget sysTile(SysType t) {
+      final on = sys == t;
+      return Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => sys = t),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
+            decoration: BoxDecoration(
+              color: on ? C.orange : C.card2,
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(color: on ? C.orange : C.line),
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(t.label, maxLines: 1, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5, color: on ? Colors.white : C.text)),
+              ),
+              const SizedBox(height: 1),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(t.sub, maxLines: 1, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: on ? Colors.white.withValues(alpha: .9) : C.mute)),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
 
     return [
-      // USC / DISCOM bill lookup. Fetches directly from the DISCOM portals.
+      // ========== STEP 1: UNIFIED MONTHLY BILLS, UNITS, USC, TARIFF, ROOF & SYSTEM TYPE ==========
       Panel(
-        child: UscSection(
-          link: _uscLink,
-          source: const DirectUscSource(),
-          onApply: _applyUsc,
-        ),
-      ),
-      _gap(),
-      Panel(
+        radius: 26,
+        padding: const EdgeInsets.all(18),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter your monthly units or a bill amount'),
-          _gap(),
-          Text('Monthly Consumption', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 13)),
-          const SizedBox(height: 8),
           Row(children: [
-            _chip('Units (kWh)', mode == 'units', () => setState(() => mode = 'units')),
-            _chip('Bill (₹)', mode == 'bill', () => setState(() => mode = 'bill')),
-          ]),
-          const SizedBox(height: 12),
-          if (mode == 'units') _field(units, 'Units / Month (kWh)'),
-          if (mode == 'bill') _field(bill, 'Bill / Month (energy charges)', prefix: '₹ '),
-          if (u > 0) ...[
             Container(
-              margin: const EdgeInsets.only(top: 12),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(color: C.amber.withValues(alpha: .14), shape: BoxShape.circle),
+              child: Icon(Icons.apartment_rounded, color: C.amber, size: 19),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${s.st.name('en').split(' ').first.toUpperCase()} · ${plan.slabLabel(u)}', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 4),
-                Text('${u.round()} kWh → ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo (₹${(_num(tariffOverride) > 0 ? _num(tariffOverride) : plan.average(u)).toStringAsFixed(2)}/kWh avg)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                if (quick != null) ...[
-                  const SizedBox(height: 4),
-                  Text('Suggested: ${quick.kwp.toStringAsFixed(2)} kWp (${quick.panels} × ${_panel.wp}W)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 14)),
+                const Text('Monthly Bills & Units Enquiry', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                Text('Enter Units, Bill amount, or fetch DISCOM USC history', style: TextStyle(color: C.mute, fontSize: 11.5)),
+              ]),
+            ),
+          ]),
+          const SizedBox(height: 16),
+
+          // Monthly Consumption + inline 3-way segmented pill toggle
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            runSpacing: 8,
+            spacing: 8,
+            children: [
+              Text('Monthly Consumption', style: TextStyle(color: C.text, fontWeight: FontWeight.w800, fontSize: 12.5)),
+              Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(11)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  modePill('units', 'Units (kWh)'),
+                  modePill('bill', 'Bill (₹)'),
+                  modePill('usc', 'USC Number'),
+                ]),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // Mode 1: Units (kWh)
+          if (mode == 'units')
+            _roundedNumberBox(
+              controller: units,
+              hint: 'e.g. 420',
+              highlightedGreen: hasSyncedUsc,
+              trailing: Text(
+                hasSyncedUsc ? 'kWh (Govt DISCOM)' : 'Units / Month (kWh)',
+                style: TextStyle(color: hasSyncedUsc ? C.green : C.mute, fontWeight: FontWeight.w700, fontSize: 11.5),
+              ),
+            ),
+
+          // Mode 2: Bill (₹)
+          if (mode == 'bill')
+            _roundedNumberBox(
+              controller: bill,
+              hint: 'e.g. 3350',
+              prefix: '₹',
+              highlightedGreen: hasSyncedUsc,
+              trailing: Text(
+                '≈ ${u.round()} Units',
+                style: TextStyle(color: C.mute, fontWeight: FontWeight.w700, fontSize: 11.5),
+              ),
+            ),
+
+          // Mode 3: Inline Live 4-State USC / DISCOM Bill Fetch (100% preserved working USC logic)
+          if (mode == 'usc')
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: C.card2,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: C.line),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Icon(Icons.electric_meter_outlined, color: C.sky, size: 18),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${s.st.name('en')} · ${s.discom.name} Live Bill Fetch',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 10),
+                if (book != null) ...[
+                  Row(children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey('est_st_${s.prefs.stateId}'),
+                        initialValue: s.prefs.stateId,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'State', isDense: true),
+                        items: [for (final x in book.states) DropdownMenuItem(value: x.id, child: Text(x.name('en'), overflow: TextOverflow.ellipsis))],
+                        onChanged: (v) {
+                          if (v == null) return;
+                          s.chooseState(v);
+                          s.savePrefs();
+                          setState(() {
+                            uscCaptcha = null;
+                            uscNeedsMobile = false;
+                            uscMsg = '';
+                            uscMeta = '';
+                            uscEbillUrl = '';
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey('est_dc_${s.prefs.stateId}_${s.prefs.discomId}'),
+                        initialValue: s.discom.id,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'DISCOM', isDense: true),
+                        items: [for (final d in s.st.discoms) DropdownMenuItem(value: d.id, child: Text(d.name, overflow: TextOverflow.ellipsis))],
+                        onChanged: (v) {
+                          if (v == null) return;
+                          s.prefs.discomId = v;
+                          s.savePrefs();
+                          setState(() {
+                            uscCaptcha = null;
+                            uscNeedsMobile = false;
+                            uscMsg = '';
+                            uscMeta = '';
+                            uscEbillUrl = '';
+                          });
+                        },
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
                 ],
-                const SizedBox(height: 6),
-                InkWell(
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: uscCtrl,
+                      onSubmitted: (_) => _fetchUsc(),
+                      decoration: const InputDecoration(labelText: 'USC / Service Number', hintText: 'e.g. 102938475', isDense: true),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: fetchingUsc ? null : () => _fetchUsc(),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                      backgroundColor: C.orange,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: Text(fetchingUsc ? '...' : 'Fetch', style: const TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ]),
+                if (uscCaptcha != null) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: C.chipBlue,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: C.blue.withValues(alpha: .4)),
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Icon(Icons.verified_user_outlined, color: C.blue, size: 17),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '${uscCaptcha!.provider} Portal Security Check',
+                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: uscRefreshingCaptcha ? null : _refreshCaptcha,
+                          icon: const Icon(Icons.refresh, size: 15),
+                          label: Text(uscRefreshingCaptcha ? 'Loading...' : 'New Code', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                        ),
+                      ]),
+                      if (uscCaptcha!.imageBytes != null) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: C.line),
+                          ),
+                          child: Image.memory(uscCaptcha!.imageBytes!, height: 46, fit: BoxFit.contain),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                          child: TextField(
+                            controller: captchaCtrl,
+                            onSubmitted: (_) => _fetchUsc(withCaptcha: true),
+                            decoration: const InputDecoration(
+                              labelText: 'Security Code',
+                              hintText: 'Type code shown above',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: fetchingUsc ? null : () => _fetchUsc(withCaptcha: true),
+                          style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.green),
+                          child: Text(fetchingUsc ? '...' : 'Verify', style: const TextStyle(fontWeight: FontWeight.w800)),
+                        ),
+                      ]),
+                    ]),
+                  ),
+                ],
+                if (uscNeedsMobile || s.discom.id == 'apspdcl') ...[
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: uscMobileCtrl,
+                        keyboardType: TextInputType.phone,
+                        maxLength: 10,
+                        decoration: InputDecoration(
+                          labelText: uscNeedsMobile ? 'Linked 10-Digit Mobile (Required)' : 'Linked 10-Digit Mobile (Optional for APSPDCL)',
+                          hintText: '10-digit mobile linked to USC',
+                          counterText: '',
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    if (uscNeedsMobile) ...[
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: fetchingUsc ? null : () => _fetchUsc(),
+                        style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.orange),
+                        child: const Text('Submit', style: TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                    ],
+                  ]),
+                ],
+                const SizedBox(height: 8),
+                Wrap(spacing: 6, runSpacing: 6, children: [
+                  OutlinedButton.icon(
+                    onPressed: () => _open(s.discom.url),
+                    icon: const Icon(Icons.open_in_new, size: 14),
+                    label: Text('Open ${s.discom.name}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                    style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => setState(() => uscPasteOpen = !uscPasteOpen),
+                    icon: const Icon(Icons.content_paste_go_outlined, size: 14),
+                    label: Text(uscPasteOpen ? 'Hide Paste' : 'Paste Bills', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                    style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                  ),
+                  if (uscEbillUrl.isNotEmpty)
+                    OutlinedButton.icon(
+                      onPressed: () => _open(uscEbillUrl),
+                      icon: const Icon(Icons.receipt_long_outlined, size: 14),
+                      label: const Text('Official e-Bill', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                      style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                    ),
+                ]),
+                if (uscPasteOpen) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: uscPasteCtrl,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Paste portal bill rows (Month  Units  Amount)',
+                      hintText: 'Nov 2025  360  2480\nDec 2025  310  2090',
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  FilledButton(
+                    onPressed: _applyPastedBills,
+                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), backgroundColor: C.blue),
+                    child: const Text('Apply Pasted Monthly Units', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ],
+                if (uscMsg.isNotEmpty)
+                  _note(
+                    uscErr ? Icons.info_outline : (uscCaptcha != null || uscNeedsMobile ? Icons.verified_user_outlined : Icons.check_circle_outline),
+                    uscErr ? C.amber : (uscCaptcha != null || uscNeedsMobile ? C.blue : C.green),
+                    uscMeta.isNotEmpty && !uscErr ? '$uscMsg\n$uscMeta' : uscMsg,
+                  ),
+                if (uscMonths.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 58,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        for (final m in uscMonths.take(12))
+                          Container(
+                            margin: const EdgeInsets.only(right: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: m.verified ? C.green.withValues(alpha: .08) : C.card,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: m.verified ? C.green.withValues(alpha: .45) : C.line),
+                            ),
+                            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                              Text(m.month, style: TextStyle(color: C.mute, fontSize: 10.5, fontWeight: FontWeight.w700)),
+                              Text('${m.units.round()} U', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                            ]),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ]),
+            ),
+
+          // Verified USC Status Banner (when on Units/Bill tab after a USC sync)
+          if (mode != 'usc' && hasSyncedUsc) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+              decoration: BoxDecoration(
+                color: C.chipGreen,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: C.green.withValues(alpha: .35)),
+              ),
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.check_circle_outline, color: C.green, size: 15),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Official $syncedUscDiscom USC #$syncedUscNo',
+                      style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5),
+                    ),
+                  ]),
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    GestureDetector(
+                      onTap: () => setState(() => mode = 'usc'),
+                      child: Text('View DISCOM Bills', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 11.5)),
+                    ),
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        syncedUscNo = '';
+                        syncedUscDiscom = '';
+                        uscMonths = [];
+                        uscMsg = '';
+                        uscMeta = '';
+                        uscEbillUrl = '';
+                      }),
+                      child: Text('Clear USC', style: TextStyle(color: C.mute, fontWeight: FontWeight.w700, fontSize: 11.5)),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          ],
+
+          // Compact Exact DISCOM Slab <-> Suggested Solar Verification Strip
+          if (mode != 'usc' && u > 0) ...[
+            const SizedBox(height: 9),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: C.chipBlue,
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: C.sky.withValues(alpha: .28)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    Text.rich(
+                      TextSpan(
+                        style: TextStyle(fontSize: 11.5, color: C.text, fontWeight: FontWeight.w600),
+                        children: [
+                          TextSpan(text: '${s.discom.name} Slab: '),
+                          TextSpan(text: '${groupIndian(u)} kWh', style: const TextStyle(fontWeight: FontWeight.w800)),
+                          const TextSpan(text: ' ↔ '),
+                          TextSpan(text: '₹${groupIndian(estBill)}', style: const TextStyle(fontWeight: FontWeight.w800)),
+                          TextSpan(text: ' (₹${effAvgRate.toStringAsFixed(2)}/kWh)', style: TextStyle(color: C.mute, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                    if (quick != null)
+                      Text(
+                        'Suggested: ${quick.kwp.toStringAsFixed(2)} kWp (${quick.panels} × ${_panel.wp}W)',
+                        style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 11.5),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                GestureDetector(
                   onTap: () => setState(() => slabOpen = !slabOpen),
-                  child: Row(children: [
-                    Text(slabOpen ? 'Hide bill working' : 'How was this bill worked out?', style: TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 12.5)),
-                    Icon(slabOpen ? Icons.expand_less : Icons.expand_more, color: C.blue, size: 18),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text(
+                      slabOpen ? 'Hide bill working' : 'How was this bill worked out?',
+                      style: TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 11),
+                    ),
+                    Icon(slabOpen ? Icons.expand_less : Icons.expand_more, color: C.blue, size: 15),
                   ]),
                 ),
                 if (slabOpen) ..._slabLines(plan, u),
               ]),
             ),
           ],
-          const SizedBox(height: 12),
-          Row(children: [
-            for (final q in const [250, 400, 600])
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() {
-                    mode = 'units';
-                    units.text = '$q';
-                  }),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-                    child: FittedBox(fit: BoxFit.scaleDown, child: Text('$q U (₹${groupIndian(plan.bill(q.toDouble()))})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
+
+          // 5 Horizontally Scrollable Quick Preset Consumption Pills
+          if (mode != 'usc') ...[
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final q in const [250, 400, 600, 800, 1200])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: GestureDetector(
+                      onTap: () => setState(() {
+                        mode = 'units';
+                        units.text = '$q';
+                        bill.text = plan.bill(q.toDouble()).round().toString();
+                      }),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: u.round() == q ? const Color(0xFFF59E0B) : C.card2,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: u.round() == q ? const Color(0xFFF59E0B) : C.line),
+                        ),
+                        child: Text(
+                          '$q U (${_shortInr(plan.bill(q.toDouble()))})',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                            color: u.round() == q ? const Color(0xFF0F172A) : C.text,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ]),
+            ),
+          ],
+
+          // Inline Expandable Bill Helper Accordion
+          if (mode != 'usc') ...[
+            const SizedBox(height: 10),
+            Container(
+              decoration: BoxDecoration(
+                color: C.amber.withValues(alpha: .10),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: C.amber.withValues(alpha: .35)),
+              ),
+              child: Column(children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => setState(() => helperOpen = !helperOpen),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(children: [
+                      const Expanded(
+                        child: Text(
+                          "Don't know your exact units? Calculate from bill",
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+                        ),
+                      ),
+                      Icon(helperOpen ? Icons.expand_less : Icons.expand_more, color: C.amber, size: 19),
+                    ]),
                   ),
                 ),
-              ),
+                if (helperOpen) ...[
+                  Divider(height: 1, color: C.amber.withValues(alpha: .28)),
+                  Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Expanded(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: C.card,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: C.amber.withValues(alpha: .55)),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            child: Row(children: [
+                              Text('₹', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800)),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: TextField(
+                                  controller: helperBillCtrl,
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  onChanged: (_) => setState(() {}),
+                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                  decoration: const InputDecoration(
+                                    hintText: 'e.g. 4800',
+                                    border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    filled: false,
+                                    isDense: true,
+                                    contentPadding: EdgeInsets.symmetric(vertical: 9),
+                                  ),
+                                ),
+                              ),
+                            ]),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: helperSolvedUnits > 0
+                              ? () => setState(() {
+                                    mode = 'units';
+                                    units.text = '$helperSolvedUnits';
+                                    bill.text = helperAmt.round().toString();
+                                    helperOpen = false;
+                                  })
+                              : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFF59E0B),
+                            foregroundColor: const Color(0xFF0F172A),
+                            minimumSize: const Size(0, 38),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: Text('Apply ($helperSolvedUnits Units)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                        ),
+                      ]),
+                      if (applMonthly > 0) ...[
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          Expanded(
+                            child: Text(
+                              'From Appliance Calculator: ${applMonthly.round()} kWh',
+                              style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () => setState(() {
+                              mode = 'units';
+                              units.text = '${applMonthly.round()}';
+                              helperOpen = false;
+                            }),
+                            child: Text('Use Appliance Total', style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 11.5)),
+                          ),
+                        ]),
+                      ],
+                    ]),
+                  ),
+                ],
+              ]),
+            ),
+          ],
+
+          // Grid Tariff Per Unit — inside the same unified Step 1 card
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(
+              child: Text('Electricity Cost Per Unit (₹/kWh)', style: TextStyle(color: C.text, fontWeight: FontWeight.w700, fontSize: 12.5)),
+            ),
+            GestureDetector(
+              onTap: syncingTariff ? null : _syncLiveTariff,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.refresh, size: 13, color: C.sky),
+                const SizedBox(width: 3),
+                Text(
+                  syncingTariff ? 'Syncing...' : '${s.discom.name} Live (₹${activeRate.toStringAsFixed(2)})',
+                  style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 11),
+                ),
+              ]),
+            ),
           ]),
-          if (mode == 'units') ...[
-            const SizedBox(height: 10),
-            InkWell(
-              onTap: () => setState(() => mode = 'bill'),
-              borderRadius: BorderRadius.circular(14),
+          const SizedBox(height: 6),
+          _roundedNumberBox(
+            controller: tariffOverride,
+            hint: activeRate.toStringAsFixed(2),
+            highlightedGreen: hasSyncedUsc && tariffOverride.text.trim().isEmpty,
+            trailing: Text(
+              tariffOverride.text.trim().isEmpty ? 'Govt DISCOM Rate' : 'Custom ₹/kWh',
+              style: TextStyle(
+                color: tariffOverride.text.trim().isEmpty ? C.green : C.mute,
+                fontWeight: FontWeight.w800,
+                fontSize: 11,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${s.st.order} · Effective ${s.st.effective} · Auto slab: ₹${(u > 0 ? plan.marginal(u) : s.unitPrice).toStringAsFixed(2)}/kWh',
+            style: TextStyle(color: C.mute, fontSize: 10.8, height: 1.3),
+          ),
+
+          // Roof Area (Optional) + Amber Map Button — inside the same unified Step 1 card
+          const SizedBox(height: 14),
+          Text('Roof Area in Square Meters (Optional)', style: TextStyle(color: C.text, fontWeight: FontWeight.w700, fontSize: 12.5)),
+          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(
+              child: _roundedNumberBox(
+                controller: roof,
+                hint: 'e.g. 27.5 m²',
+                trailing: Text('m²', style: TextStyle(color: C.mute, fontWeight: FontWeight.w700, fontSize: 12)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: _openRoofMap,
               child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: C.amber.withValues(alpha: .1), borderRadius: BorderRadius.circular(14), border: Border.all(color: C.amber.withValues(alpha: .35))),
-                child: Row(children: [
-                  const Expanded(child: Text("Don't know your exact units? Calculate from bill", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
-                  Icon(Icons.expand_more, color: C.mute),
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: C.amber.withValues(alpha: .12),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: C.amber.withValues(alpha: .75), width: 1.5),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.location_on_outlined, color: C.orange, size: 18),
+                  const SizedBox(width: 4),
+                  const Text('Map', style: TextStyle(color: Color(0xFFB45309), fontWeight: FontWeight.w800, fontSize: 12.5)),
                 ]),
               ),
             ),
-          ],
-        ]),
-      ),
-      _gap(),
-      Panel(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          ]),
+          if (roofTrace != null)
+            _note(Icons.roofing, C.green, 'Traced roof: ${roofTrace!.areaM2.toStringAsFixed(1)} m². It fits ${roofTrace!.panels} panels (${roofTrace!.kwp.toStringAsFixed(2)} kWp).'),
+
+          // System Type — inside the same unified Step 1 card separated by divider
+          const SizedBox(height: 14),
+          Divider(height: 1, color: C.line),
+          const SizedBox(height: 12),
           Row(children: [
-            const Expanded(child: Text('Electricity Cost Per Unit (₹/kWh)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-            Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text(s.discom.name, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
+            Expanded(child: Text('System Type', style: TextStyle(color: C.text, fontWeight: FontWeight.w700, fontSize: 12.5))),
+            Text(sys.status, style: TextStyle(color: C.mute, fontWeight: FontWeight.w700, fontSize: 11)),
           ]),
           const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: C.chipGreen,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: C.green.withValues(alpha: .35)),
-            ),
-            child: Row(children: [
-              Expanded(
-                child: Text('₹ ${activeRate.toStringAsFixed(2)} / kWh',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: C.green)),
-              ),
-              Icon(syncingTariff ? Icons.sync : Icons.verified_outlined, size: 16, color: C.green),
-              const SizedBox(width: 5),
-              Text(syncingTariff ? 'Syncing…' : 'Auto-synced by DISCOM',
-                  style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 11.5)),
-            ]),
-          ),
-          const SizedBox(height: 6),
-          Text('${s.st.order}. Effective ${s.st.effective}. Auto slab: ₹${(u > 0 ? plan.marginal(u) : s.unitPrice).toStringAsFixed(2)}/kWh.', style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
-          _gap(),
-          Text('Roof Area in Square Meters (Optional)', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 13)),
-          const SizedBox(height: 8),
           Row(children: [
-            Expanded(child: _field(roof, 'Roof area', suffix: 'sq m')),
-            const SizedBox(width: 10),
-            OutlinedButton.icon(
-              onPressed: _openRoofMap,
-              icon: const Icon(Icons.location_on_outlined, size: 18),
-              label: const Text('Map', style: TextStyle(fontWeight: FontWeight.w800)),
-              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), foregroundColor: C.orange, side: BorderSide(color: C.orange.withValues(alpha: .6))),
-            ),
+            sysTile(SysType.onGrid),
+            const SizedBox(width: 6),
+            sysTile(SysType.hybrid),
+            const SizedBox(width: 6),
+            sysTile(SysType.offGrid),
           ]),
-          if (roofTrace != null) _note(Icons.roofing, C.green, 'Traced roof: ${roofTrace!.areaM2.toStringAsFixed(1)} m². It fits ${roofTrace!.panels} panels (${roofTrace!.kwp.toStringAsFixed(2)} kWp).'),
-        ]),
-      ),
-      _gap(),
-      Panel(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Expanded(child: Text('System Type', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
-            Text(sys.status, style: TextStyle(color: C.mute, fontWeight: FontWeight.w700, fontSize: 12.5)),
-          ]),
-          const SizedBox(height: 10),
-          Row(children: [for (final t in SysType.values) _chip(t.label, sys == t, () => setState(() => sys = t), sub: t.sub)]),
           if (sys.hasBattery) ...[
             const SizedBox(height: 12),
             Row(children: [
-              Icon(Icons.battery_charging_full, color: C.orange, size: 19),
-              const SizedBox(width: 6),
-              const Expanded(child: Text('Battery Backup (Hours)', style: TextStyle(fontWeight: FontWeight.w800))),
-              Text('Based on inverter', style: TextStyle(color: C.mute, fontSize: 12)),
+              Icon(Icons.battery_charging_full, color: C.orange, size: 17),
+              const SizedBox(width: 5),
+              const Expanded(child: Text('Battery Backup (Hours)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5))),
+              Text('Based on Inverter', style: TextStyle(color: C.mute, fontSize: 11, fontWeight: FontWeight.w600)),
             ]),
-            const SizedBox(height: 8),
-            _field(backup, 'Backup hours', hint: 'Enter backup hours based on inverter'),
+            const SizedBox(height: 6),
+            _roundedNumberBox(controller: backup, hint: 'Enter backup hours based on inverter'),
           ],
         ]),
       ),
-      _gap(),
+      _gap(12),
+
+      // ========== STEP 2: VALIDATED USAGE + 1) INSTALLATION CATEGORY + 2) SELECT THE MODULE ==========
       Panel(
+        radius: 22,
+        padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (u > 0)
-            Row(children: [
-              Icon(Icons.check_circle_outline, color: C.green, size: 19),
-              const SizedBox(width: 6),
-              Expanded(child: Text('Analyzed Usage: ${u.round()} kWh · ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
-            ])
-          else
-            Text('Enter units or a bill above.', style: TextStyle(color: C.mute)),
-          _gap(),
           Row(children: [
-            CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('1', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
-            const SizedBox(width: 8),
-            const Text('Installation Category', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            Icon(u > 0 ? Icons.check_circle_outline : Icons.error_outline, color: u > 0 ? C.green : C.red, size: 17),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                u > 0
+                    ? (hasSyncedUsc
+                        ? 'Analyzed $syncedUscDiscom Usage: ${groupIndian(u)} kWh · ₹${groupIndian(estBill)}/mo'
+                        : 'Analyzed Usage: ${groupIndian(u)} kWh · ₹${groupIndian(estBill)}/mo')
+                    : 'Complete valid usage data above to proceed',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+              decoration: BoxDecoration(
+                color: u > 0 ? C.chipGreen : C.red.withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(99),
+              ),
+              child: Text(
+                u > 0 ? 'Validated' : 'Action Needed',
+                style: TextStyle(color: u > 0 ? C.green : C.red, fontWeight: FontWeight.w800, fontSize: 10.5),
+              ),
+            ),
           ]),
           const SizedBox(height: 10),
+          Divider(height: 1, color: C.line),
+          const SizedBox(height: 12),
+
+          // 1. Installation Category (crisp 3-column grid matching Web App)
           Row(children: [
-            _chip('Residential', category == 'residential', () {
+            CircleAvatar(
+              radius: 10,
+              backgroundColor: C.orange,
+              child: const Text('1', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+            ),
+            const SizedBox(width: 7),
+            const Expanded(child: Text('Installation Category', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
+            if (u > 0)
+              Text(
+                'Based on ${groupIndian(u)} kWh · ₹${groupIndian(estBill)}/mo',
+                style: TextStyle(color: C.mute, fontWeight: FontWeight.w600, fontSize: 10.5),
+              ),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            catTile('residential', 'Residential', dcr ? 'Govt Subsidy' : 'Open Capex', () {
               setState(() => category = 'residential');
               s.prefs.category = 'domestic';
               s.savePrefs();
-            }, sub: 'Open Capex'),
-            _chip('Commercial', category == 'commercial', () {
+            }),
+            const SizedBox(width: 6),
+            catTile('commercial', 'Commercial', dcr ? 'ALMM Spec' : 'Lower Cost', () {
               setState(() => category = 'commercial');
               s.prefs.category = 'commercial';
               s.savePrefs();
-            }, sub: 'Lower Cost'),
-            _chip('Industrial', category == 'industrial', () {
-              setState(() => category = 'industrial');
-              s.prefs.category = 'industrial';
-              s.savePrefs();
-            }, sub: 'Plant'),
-            _chip('Agricultural', category == 'agricultural', () => setState(() => category = 'agricultural'), sub: 'Pumps'),
+            }),
+            const SizedBox(width: 6),
+            catTile('agricultural', 'Agricultural', dcr ? 'PM-KUSUM' : 'Captive', () {
+              setState(() => category = 'agricultural');
+            }),
           ]),
-          _gap(),
+          const SizedBox(height: 12),
+          Divider(height: 1, color: C.line),
+          const SizedBox(height: 12),
+
+          // 2. Select The Module (dark badge + shield + info guide + custom pill DCR toggle)
           Row(children: [
-            CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('2', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
+            Expanded(
+              child: Row(children: [
+                CircleAvatar(
+                  radius: 10,
+                  backgroundColor: C.text,
+                  child: Text('2', style: TextStyle(color: C.bg, fontSize: 11, fontWeight: FontWeight.w800)),
+                ),
+                const SizedBox(width: 6),
+                Icon(Icons.verified_user_outlined, color: C.amber, size: 16),
+                const SizedBox(width: 5),
+                const Flexible(
+                  child: Text('Select The Module', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                ),
+                const SizedBox(width: 5),
+                GestureDetector(
+                  onTap: _showModuleGuideDialog,
+                  child: Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      color: C.chipBlue,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: C.sky.withValues(alpha: .4)),
+                    ),
+                    child: Icon(Icons.info_outline, color: C.sky, size: 13),
+                  ),
+                ),
+              ]),
+            ),
             const SizedBox(width: 8),
-            const Expanded(child: Text('Select The Module', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-            Text('DCR', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 13)),
-            Switch(
-              value: !dcr,
-              onChanged: (v) => setState(() {
-                dcr = !v;
+            _dcrToggle(
+              isDcr: dcr,
+              onChanged: (nextDcr) => setState(() {
+                dcr = nextDcr;
                 panelIdx = 1;
               }),
-              thumbColor: const WidgetStatePropertyAll(Colors.white),
-              trackColor: WidgetStatePropertyAll(C.amber),
-              trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
             ),
-            Text('Non-DCR', style: TextStyle(color: C.text, fontWeight: FontWeight.w800, fontSize: 13)),
           ]),
-          Text(subsidyNote(_profile, dcr, sys), style: TextStyle(color: C.mute, fontSize: 12, height: 1.35)),
         ]),
       ),
-      _gap(),
-      _bigButton('Calculate the Solar System', _calc, icon: Icons.arrow_forward),
-      _gap(),
+      _gap(12),
+
+      // ========== 3. CALCULATE CTA BUTTON ==========
+      FilledButton(
+        onPressed: _calc,
+        style: FilledButton.styleFrom(
+          minimumSize: const Size.fromHeight(54),
+          backgroundColor: u > 0 ? C.orange : C.mute.withValues(alpha: .4),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        ),
+        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Text('Calculate the Solar System', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5)),
+          SizedBox(width: 6),
+          Icon(Icons.chevron_right, size: 22),
+        ]),
+      ),
+      _gap(12),
+
+      // ========== USC HISTORY CARD (matching Web App Shared USC History section) ==========
       Panel(
+        radius: 26,
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(color: C.chipBlue, shape: BoxShape.circle),
+              child: Icon(Icons.history, color: C.sky, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Text('USC History', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: C.chipGreen,
+                      borderRadius: BorderRadius.circular(99),
+                      border: Border.all(color: C.green.withValues(alpha: .35)),
+                    ),
+                    child: Text('${s.uscHistory.length} Saved', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 10.5)),
+                  ),
+                ]),
+                Text('Saved lookups for 1-click re-runs or quick estimates', style: TextStyle(color: C.mute, fontSize: 11.5)),
+              ]),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          if (s.uscHistory.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: C.card2,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: C.line),
+              ),
+              child: Column(children: [
+                Text('No USC lookups recorded yet.', style: TextStyle(color: C.text, fontWeight: FontWeight.w700, fontSize: 12.5)),
+                const SizedBox(height: 3),
+                Text(
+                  'Fetch any account in the USC Number tab above to save it here for 1-click re-runs.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: C.mute, fontSize: 11),
+                ),
+              ]),
+            )
+          else
+            for (final h in s.uscHistory.take(6))
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: C.card2,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: C.line),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                    Text('USC #${h.usc}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: C.amber.withValues(alpha: .16), borderRadius: BorderRadius.circular(6)),
+                      child: Text(h.discomName, style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 10)),
+                    ),
+                  ]),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${h.consumerName.isNotEmpty ? '${h.consumerName} · ' : ''}Avg ${h.avgMonthlyUnits.round()} kWh/mo',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: C.mute, fontSize: 11.5),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          if (h.stateId.isNotEmpty && book != null && book.states.any((st) => st.id == h.stateId)) {
+                            s.chooseState(h.stateId);
+                            s.savePrefs();
+                          }
+                          setState(() {
+                            mode = 'usc';
+                            uscCtrl.text = h.usc;
+                          });
+                          _fetchUsc();
+                        },
+                        icon: const Icon(Icons.play_arrow_rounded, size: 15),
+                        label: const Text('Re-Run Fetch', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 11.5)),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: C.orange,
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          setState(() {
+                            uscCtrl.text = h.usc;
+                            syncedUscNo = h.usc;
+                            syncedUscDiscom = h.discomName;
+                            if (h.avgMonthlyUnits > 0) {
+                              mode = 'units';
+                              units.text = h.avgMonthlyUnits.round().toString();
+                            }
+                            if (h.consumerName.isNotEmpty) name.text = h.consumerName;
+                          });
+                          toast(context, 'Loaded USC #${h.usc} (${h.avgMonthlyUnits.round()} kWh/mo)');
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: C.sky,
+                          backgroundColor: C.chipBlue,
+                          side: BorderSide(color: C.sky.withValues(alpha: .35)),
+                          minimumSize: const Size(0, 36),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                        ),
+                        child: const Text('Use Units', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 11.5)),
+                      ),
+                    ),
+                  ]),
+                ]),
+              ),
+        ]),
+      ),
+      _gap(12),
+
+      // ========== COLLAPSIBLE CUSTOMER DETAILS (for Save & PDF) ==========
+      Panel(
+        radius: 22,
+        padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           InkWell(
             onTap: () => setState(() => custOpen = !custOpen),
             child: Row(children: [
-              Icon(Icons.person_outline, color: C.blue, size: 21),
+              Icon(Icons.person_outline, color: C.blue, size: 20),
               const SizedBox(width: 8),
-              const Expanded(child: Text('Customer details (for Save & PDF)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+              const Expanded(child: Text('Customer details (for Save & PDF)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14))),
               Icon(custOpen ? Icons.expand_less : Icons.expand_more, color: C.mute),
             ]),
           ),
@@ -1017,22 +2050,17 @@ class _EstimatorPageState extends State<EstimatorPage> {
           Row(children: [
             Icon(Icons.verified_user_outlined, color: C.green, size: 20),
             const SizedBox(width: 8),
-            const Expanded(child: Text('DCR Hardware Filter & Standard', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-            Text('DCR', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 12.5)),
-            Switch(
-              value: !dcr,
-              onChanged: (v) {
+            const Expanded(child: Text('DCR Hardware Filter & Standard', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5))),
+            _dcrToggle(
+              isDcr: dcr,
+              onChanged: (nextDcr) {
                 setState(() {
-                  dcr = !v;
+                  dcr = nextDcr;
                   panelIdx = 1;
                 });
                 _recalc();
               },
-              thumbColor: const WidgetStatePropertyAll(Colors.white),
-              trackColor: WidgetStatePropertyAll(C.amber),
-              trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
             ),
-            Text('Non-DCR', style: TextStyle(color: C.text, fontWeight: FontWeight.w800, fontSize: 12.5)),
           ]),
           const SizedBox(height: 4),
           Text(dcr ? 'DCR modules use domestic cells (ALMM list). Needed for the PM Surya Ghar subsidy.' : 'Open panels (${models.first.wp}W to ${models.last.wp}W, ${models.length} typical models). Lower cost, no subsidy.', style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.3)),

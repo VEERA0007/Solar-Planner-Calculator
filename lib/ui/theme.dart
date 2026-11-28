@@ -242,6 +242,7 @@ class _BarPainter extends CustomPainter {
     final gw = size.width / n;
     final bw = math.max(1.0, gw / series.length - 2);
     final plotH = size.height - bottom - top;
+    var lastLabelRight = -1e9;
     for (var i = 0; i < n; i++) {
       for (var j = 0; j < series.length; j++) {
         final v = series[j].data[i];
@@ -260,7 +261,12 @@ class _BarPainter extends CustomPainter {
           text: TextSpan(text: l, style: const TextStyle(color: Color(0xFF7C8AA8), fontSize: 10.5)),
           textDirection: TextDirection.ltr,
         )..layout();
-        tp.paint(canvas, Offset(i * gw + gw / 2 - tp.width / 2, size.height - bottom + 5));
+        final x0 = i * gw + gw / 2 - tp.width / 2;
+        // Skip a label that would run into the previous one, so labels never overlap.
+        if (x0 >= lastLabelRight + 3) {
+          tp.paint(canvas, Offset(x0, size.height - bottom + 5));
+          lastLabelRight = x0 + tp.width;
+        }
       }
     }
   }

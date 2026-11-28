@@ -828,185 +828,226 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final applMonthly = s.monthlyUnits;
 
     return [
-      // 1. USC / DISCOM bill lookup (screenshot panel). Fetches directly from the DISCOM portals.
-      Panel(
-        child: UscSection(
-          link: _uscLink,
-          source: const DirectUscSource(),
-          onApply: _applyUsc,
-          onDiscomChanged: _onUscDiscom,
-        ),
-      ),
-      _gap(),
-
-      // 2. Monthly Bills & Units Enquiry
+      // 1. Monthly Bills & Units Enquiry: Units, Bill or USC Number in one card
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter your monthly units or a bill amount'),
+          _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter Units, Bill amount, or fetch DISCOM USC history'),
           _gap(),
           Text('Monthly Consumption', style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 13)),
           const SizedBox(height: 8),
           Row(children: [
             _chip('Units (kWh)', mode == 'units', () => setState(() => mode = 'units')),
             _chip('Bill (₹)', mode == 'bill', () => setState(() => mode = 'bill')),
+            _chip('USC Number', mode == 'usc', () => setState(() => mode = 'usc')),
           ]),
           const SizedBox(height: 12),
           if (mode == 'units') _field(units, 'Units / Month (kWh)'),
           if (mode == 'bill') _field(bill, 'Bill / Month (energy charges)', prefix: '₹ '),
-          if (u > 0) ...[
-            Container(
-              margin: const EdgeInsets.only(top: 12),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${s.st.name('en').split(' ').first.toUpperCase()} · ${plan.slabLabel(u)}', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 4),
-                Text('${u.round()} kWh → ₹${groupIndian(estBill)}/mo (₹${(u > 0 ? estBill / u : 0).toStringAsFixed(2)}/kWh avg)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                if (quick != null) ...[
-                  const SizedBox(height: 4),
-                  Text('Suggested: ${quick.kwp.toStringAsFixed(2)} kWp (${quick.panels} × ${_panel.wp}W)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 14)),
-                ],
-                const SizedBox(height: 6),
-                InkWell(
-                  onTap: () => setState(() => slabOpen = !slabOpen),
-                  child: Row(children: [
-                    Text(slabOpen ? 'Hide bill working' : 'How was this bill worked out?', style: TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 12.5)),
-                    Icon(slabOpen ? Icons.expand_less : Icons.expand_more, color: C.blue, size: 18),
-                  ]),
-                ),
-                if (slabOpen) ..._slabLines(plan, u),
-              ]),
+          // Kept alive while other modes are shown, so a fetched bill is not lost.
+          Offstage(
+            offstage: mode != 'usc',
+            child: UscSection(
+              link: _uscLink,
+              source: const DirectUscSource(),
+              onApply: _applyUsc,
+              onDiscomChanged: _onUscDiscom,
             ),
-          ],
-          const SizedBox(height: 12),
-          Row(children: [
-            for (final q in const [250, 400, 600])
-              Expanded(
-                child: GestureDetector(
-                  onTap: () => setState(() {
-                    mode = 'units';
-                    units.text = '$q';
-                  }),
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
-                    child: FittedBox(fit: BoxFit.scaleDown, child: Text('$q U (₹${groupIndian(plan.bill(q.toDouble()))})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
-                  ),
-                ),
-              ),
-          ]),
-          if (mode == 'units') ...[
-            const SizedBox(height: 10),
-            Container(
-              decoration: BoxDecoration(
-                color: C.amber.withValues(alpha: .10),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: C.amber.withValues(alpha: .35)),
-              ),
-              child: Column(children: [
-                InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => setState(() => helperOpen = !helperOpen),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+          if (mode != 'usc') ...[
+            if (u > 0) ...[
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${s.st.name('en').split(' ').first.toUpperCase()} · ${plan.slabLabel(u)}', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 4),
+                  Text('${u.round()} kWh → ₹${groupIndian(estBill)}/mo (₹${(estBill / u).toStringAsFixed(2)}/kWh avg)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                  if (quick != null) ...[
+                    const SizedBox(height: 4),
+                    Text('Suggested: ${quick.kwp.toStringAsFixed(2)} kWp (${quick.panels} × ${_panel.wp}W)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 14)),
+                  ],
+                  const SizedBox(height: 6),
+                  InkWell(
+                    onTap: () => setState(() => slabOpen = !slabOpen),
                     child: Row(children: [
-                      const Expanded(child: Text("Don't know your exact units? Calculate from bill", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
-                      Icon(helperOpen ? Icons.expand_less : Icons.expand_more, color: C.amber, size: 19),
+                      Text(slabOpen ? 'Hide bill working' : 'How was this bill worked out?', style: TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                      Icon(slabOpen ? Icons.expand_less : Icons.expand_more, color: C.blue, size: 18),
                     ]),
                   ),
+                  if (slabOpen) ..._slabLines(plan, u),
+                ]),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Row(children: [
+              for (final q in const [250, 400, 600])
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      mode = 'units';
+                      units.text = '$q';
+                    }),
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(14), border: Border.all(color: C.line)),
+                      child: FittedBox(fit: BoxFit.scaleDown, child: Text('$q U (₹${groupIndian(plan.bill(q.toDouble()))})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13))),
+                    ),
+                  ),
                 ),
-                if (helperOpen) ...[
-                  Divider(height: 1, color: C.amber.withValues(alpha: .28)),
-                  Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [
-                        Expanded(
-                          child: TextField(
-                            controller: helperBillCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            onChanged: (_) => setState(() {}),
-                            decoration: InputDecoration(
-                              prefixText: '₹ ',
-                              hintText: 'e.g. 4800',
-                              isDense: true,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        FilledButton(
-                          onPressed: helperSolvedUnits > 0
-                              ? () => setState(() {
-                                    mode = 'units';
-                                    units.text = '$helperSolvedUnits';
-                                    bill.text = helperAmt.round().toString();
-                                    helperOpen = false;
-                                  })
-                              : null,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: C.orange,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size(0, 48),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: Text('Apply ($helperSolvedUnits units)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
-                        ),
+            ]),
+            if (mode == 'units') ...[
+              const SizedBox(height: 10),
+              Container(
+                decoration: BoxDecoration(
+                  color: C.amber.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: C.amber.withValues(alpha: .35)),
+                ),
+                child: Column(children: [
+                  InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => setState(() => helperOpen = !helperOpen),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      child: Row(children: [
+                        const Expanded(child: Text("Don't know your exact units? Calculate from bill", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
+                        Icon(helperOpen ? Icons.expand_less : Icons.expand_more, color: C.amber, size: 19),
                       ]),
-                      if (applMonthly > 0) ...[
-                        const SizedBox(height: 8),
+                    ),
+                  ),
+                  if (helperOpen) ...[
+                    Divider(height: 1, color: C.amber.withValues(alpha: .28)),
+                    Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Row(children: [
                           Expanded(
-                            child: Text('From Appliance Calculator: ${applMonthly.round()} kWh', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w600)),
+                            child: TextField(
+                              controller: helperBillCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              onChanged: (_) => setState(() {}),
+                              decoration: InputDecoration(
+                                prefixText: '₹ ',
+                                hintText: 'e.g. 4800',
+                                isDense: true,
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                            ),
                           ),
-                          GestureDetector(
-                            onTap: () => setState(() {
-                              mode = 'units';
-                              units.text = '${applMonthly.round()}';
-                              helperOpen = false;
-                            }),
-                            child: Text('Use Appliance Total', style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 11.5)),
+                          const SizedBox(width: 8),
+                          FilledButton(
+                            onPressed: helperSolvedUnits > 0
+                                ? () => setState(() {
+                                      mode = 'units';
+                                      units.text = '$helperSolvedUnits';
+                                      bill.text = helperAmt.round().toString();
+                                      helperOpen = false;
+                                    })
+                                : null,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: C.orange,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(0, 48),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: Text('Apply ($helperSolvedUnits units)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                           ),
                         ]),
-                      ],
-                    ]),
-                  ),
-                ],
-              ]),
-            ),
+                        if (applMonthly > 0) ...[
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            Expanded(
+                              child: Text('From Appliance Calculator: ${applMonthly.round()} kWh', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w600)),
+                            ),
+                            GestureDetector(
+                              onTap: () => setState(() {
+                                mode = 'units';
+                                units.text = '${applMonthly.round()}';
+                                helperOpen = false;
+                              }),
+                              child: Text('Use Appliance Total', style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 11.5)),
+                            ),
+                          ]),
+                        ],
+                      ]),
+                    ),
+                  ],
+                ]),
+              ),
+            ],
+          ],
+          if (u > 0) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: C.line),
+            const SizedBox(height: 10),
+            Row(children: [
+              Icon(Icons.check_circle_outline, color: C.green, size: 19),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Analyzed ${s.discom.name} Usage: ${groupIndian(u)} kWh · ₹${groupIndian(estBill)}/mo',
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)),
+                child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5)),
+              ),
+            ]),
           ],
         ]),
       ),
-
-      // 3. Analyzed usage for the selected DISCOM
-      if (u > 0) ...[
-        _gap(),
-        Panel(
-          child: Row(children: [
-            Icon(Icons.check_circle_outline, color: C.green, size: 19),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                'Analyzed ${s.discom.name} Usage: ${groupIndian(u)} kWh · ₹${groupIndian(estBill)}/mo',
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-              decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)),
-              child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5)),
-            ),
-          ]),
-        ),
-      ],
       _gap(),
 
-      // 4. Electricity cost (follows the selected DISCOM) and roof area
+      // 2. One tab: System Type, Installation Category, Electricity Cost and Roof Area
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Electricity Cost Per Unit (₹/kWh)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+          Row(children: [
+            const Expanded(child: Text('System Type', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+            Text(sys.status, style: TextStyle(color: C.mute, fontWeight: FontWeight.w700, fontSize: 12.5)),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            for (final t in SysType.values)
+              _chip(t.label, sys == t, () {
+                setState(() => sys = t);
+                _syncLiveTariff();
+              }, sub: t.sub),
+          ]),
+          if (sys.hasBattery) ...[
+            const SizedBox(height: 12),
+            Row(children: [
+              Icon(Icons.battery_charging_full, color: C.orange, size: 19),
+              const SizedBox(width: 6),
+              const Expanded(child: Text('Battery Backup (Hours)', style: TextStyle(fontWeight: FontWeight.w800))),
+              Text('Based on inverter', style: TextStyle(color: C.mute, fontSize: 12)),
+            ]),
+            const SizedBox(height: 8),
+            _field(backup, 'Backup hours', hint: 'Enter backup hours based on inverter'),
+          ],
+          _gap(),
+          Divider(height: 1, color: C.line),
+          _gap(),
+          Row(children: [
+            CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('1', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
+            const SizedBox(width: 8),
+            const Text('Installation Category', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            _chip('Residential', category == 'residential', () => _setCategory('residential', 'domestic'), sub: dcr ? 'Govt Subsidy' : 'Open Capex'),
+            _chip('Commercial', category == 'commercial', () => _setCategory('commercial', 'commercial'), sub: dcr ? 'ALMM Spec' : 'Lower Cost'),
+            _chip('Industrial', category == 'industrial', () => _setCategory('industrial', 'industrial'), sub: 'Plant'),
+            _chip('Agricultural', category == 'agricultural', () => _setCategory('agricultural', 'agricultural'), sub: 'Pumps'),
+          ]),
+          _gap(),
+          Divider(height: 1, color: C.line),
+          _gap(),
+          Text('Electricity Cost Per Unit (₹/kWh)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
             key: ValueKey('est_dc_${s.prefs.stateId}_${s.prefs.discomId}'),
@@ -1015,7 +1056,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
             decoration: const InputDecoration(labelText: 'DISCOM', isDense: true),
             items: [for (final d in s.st.discoms) DropdownMenuItem(value: d.id, child: Text(d.name, overflow: TextOverflow.ellipsis))],
             onChanged: (v) {
-              if (v != null) _setTariffDiscom(v);
+              if (v != null) _applyDiscom(s.prefs.stateId, v);
             },
           ),
           const SizedBox(height: 10),
@@ -1029,13 +1070,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
             ),
             child: Row(children: [
               Expanded(
-                child: Text('₹ ${activeRate.toStringAsFixed(2)} / kWh',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: C.green)),
+                child: Text('₹ ${activeRate.toStringAsFixed(2)} / kWh', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: C.green)),
               ),
               Icon(syncingTariff ? Icons.sync : Icons.verified_outlined, size: 16, color: C.green),
               const SizedBox(width: 5),
-              Text(syncingTariff ? 'Syncing…' : 'Auto-synced by DISCOM',
-                  style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 11.5)),
+              Text(syncingTariff ? 'Syncing…' : 'Auto-synced by DISCOM', style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 11.5)),
             ]),
           ),
           const SizedBox(height: 6),
@@ -1059,58 +1098,9 @@ class _EstimatorPageState extends State<EstimatorPage> {
       ),
       _gap(),
 
-      // 5. System type
+      // 3. Module selection
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Expanded(child: Text('System Type', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
-            Text(sys.status, style: TextStyle(color: C.mute, fontWeight: FontWeight.w700, fontSize: 12.5)),
-          ]),
-          const SizedBox(height: 10),
-          Row(children: [for (final t in SysType.values) _chip(t.label, sys == t, () => setState(() => sys = t), sub: t.sub)]),
-          if (sys.hasBattery) ...[
-            const SizedBox(height: 12),
-            Row(children: [
-              Icon(Icons.battery_charging_full, color: C.orange, size: 19),
-              const SizedBox(width: 6),
-              const Expanded(child: Text('Battery Backup (Hours)', style: TextStyle(fontWeight: FontWeight.w800))),
-              Text('Based on inverter', style: TextStyle(color: C.mute, fontSize: 12)),
-            ]),
-            const SizedBox(height: 8),
-            _field(backup, 'Backup hours', hint: 'Enter backup hours based on inverter'),
-          ],
-        ]),
-      ),
-      _gap(),
-
-      // 6. Installation category and module
-      Panel(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('1', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
-            const SizedBox(width: 8),
-            const Text('Installation Category', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-          ]),
-          const SizedBox(height: 10),
-          Row(children: [
-            _chip('Residential', category == 'residential', () {
-              setState(() => category = 'residential');
-              s.prefs.category = 'domestic';
-              s.savePrefs();
-            }, sub: dcr ? 'Govt Subsidy' : 'Open Capex'),
-            _chip('Commercial', category == 'commercial', () {
-              setState(() => category = 'commercial');
-              s.prefs.category = 'commercial';
-              s.savePrefs();
-            }, sub: dcr ? 'ALMM Spec' : 'Lower Cost'),
-            _chip('Industrial', category == 'industrial', () {
-              setState(() => category = 'industrial');
-              s.prefs.category = 'industrial';
-              s.savePrefs();
-            }, sub: 'Plant'),
-            _chip('Agricultural', category == 'agricultural', () => setState(() => category = 'agricultural'), sub: 'Pumps'),
-          ]),
-          _gap(),
           Row(children: [
             CircleAvatar(radius: 11, backgroundColor: C.text, child: const Text('2', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
             const SizedBox(width: 6),
@@ -1118,10 +1108,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
             const SizedBox(width: 5),
             const Flexible(child: Text('Select The Module', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
             const SizedBox(width: 5),
-            GestureDetector(
-              onTap: _showModuleGuideDialog,
-              child: Icon(Icons.info_outline, color: C.sky, size: 17),
-            ),
+            GestureDetector(onTap: _showModuleGuideDialog, child: Icon(Icons.info_outline, color: C.sky, size: 17)),
             const Spacer(),
             _dcrToggle(
               isDcr: dcr,
@@ -1162,25 +1149,48 @@ class _EstimatorPageState extends State<EstimatorPage> {
     ];
   }
 
-  /// Switches the tariff DISCOM, re-syncs the USC panel to it, and fetches its live rate.
-  void _setTariffDiscom(String id) {
-    if (id == s.prefs.discomId) return;
-    s.prefs.discomId = id;
+  /// Sets the installation category, saves it, and re-syncs the live rate for it.
+  void _setCategory(String id, String prefCategory) {
+    setState(() => category = id);
+    s.prefs.category = prefCategory;
     s.savePrefs();
-    _uscLink.discomCode.value = _uscCodeFor(id);
+    _syncLiveTariff();
+  }
+
+  /// Picks a state and DISCOM together, saves them, and re-syncs the live rate.
+  void _applyDiscom(String stateId, String discomId) {
+    if (stateId == s.prefs.stateId && discomId == s.prefs.discomId) return;
+    if (stateId != s.prefs.stateId) {
+      s.chooseState(stateId);
+    }
+    s.prefs.discomId = discomId;
+    s.savePrefs();
+    _uscLink.discomCode.value = _uscCodeFor(discomId);
     setState(() {});
     _syncLiveTariff();
   }
 
-  /// The USC panel picked a DISCOM: the electricity rate follows it.
+  /// The USC panel picked a state and DISCOM: the estimator follows them.
   void _onUscDiscom(UscDiscom d) {
-    final id = _tariffIdFor(d.code);
-    if (id != null) _setTariffDiscom(id);
+    final stateId = _stateIdFor(d.region);
+    final discomId = _tariffIdFor(stateId, d.code);
+    if (discomId == null) return;
+    _applyDiscom(stateId, discomId);
   }
 
-  String? _tariffIdFor(String uscCode) {
+  String _stateIdFor(UscRegion r) => switch (r) {
+        UscRegion.telangana => 'telangana',
+        UscRegion.andhra => 'andhra_pradesh',
+        UscRegion.odisha => 'odisha',
+        UscRegion.chhattisgarh => 'chhattisgarh',
+      };
+
+  /// The tariff DISCOM id of [stateId] that matches a USC DISCOM code.
+  String? _tariffIdFor(String stateId, String uscCode) {
     final c = uscCode.toLowerCase();
-    for (final d in s.st.discoms) {
+    final StateTariff? st = s.book?.byId(stateId);
+    if (st == null) return null;
+    for (final d in st.discoms) {
       if (d.id.toLowerCase() == c) return d.id;
     }
     return null;

@@ -89,6 +89,9 @@ class _UscSectionState extends State<UscSection> {
     super.initState();
     widget.link.load.addListener(_onLoad);
     widget.link.discomCode.addListener(_onDiscomCode);
+    UscStore.load().then((list) {
+      if (mounted && widget.link.saved.value.isEmpty) widget.link.saved.value = list;
+    });
     final pendingDiscom = discomByCode(widget.link.discomCode.value);
     if (pendingDiscom != null) {
       region = pendingDiscom.region;

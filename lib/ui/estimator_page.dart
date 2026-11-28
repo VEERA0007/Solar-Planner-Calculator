@@ -1146,7 +1146,16 @@ class _EstimatorPageState extends State<EstimatorPage> {
           ],
         ]),
       ),
+      _gap(),
+      // USC history: re-run or load a previously fetched USC account
+      UscHistory(link: _uscLink, onOpen: _openUscRecord),
     ];
+  }
+
+  /// Opens a USC from history in the USC panel. Re-runs the fetch or loads the saved bill.
+  void _openUscRecord(UscLoad request) {
+    setState(() => mode = 'usc');
+    _uscLink.load.value = request;
   }
 
   /// Sets the installation category, saves it, and re-syncs the live rate for it.

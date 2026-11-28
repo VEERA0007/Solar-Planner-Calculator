@@ -1,4 +1,5 @@
 import 'service_data.dart';
+import 'inverter_history.dart';
 import 'appliance_data.dart';
 import 'backend_service.dart';
 import 'estimator_data.dart';
@@ -252,6 +253,7 @@ class AppState extends ChangeNotifier {
   InverterConfig inverterCfg = InverterConfig();
   InverterSnapshot? inverterSnap;
   List<UscHistoryItem> uscHistory = [];
+  List<InverterLoginItem> inverterLogins = [];
 
   /// Set by Appliance Analysis; the Estimator picks it up when it opens.
   EstimateInput? estimatePush;
@@ -303,6 +305,8 @@ class AppState extends ChangeNotifier {
       if (ic != null) inverterCfg = InverterConfig.fromJson(ic);
       final isnp = obj('inverter_snap');
       if (isnp != null) inverterSnap = InverterSnapshot.fromJson(isnp);
+      final il = list('inverter_logins');
+      if (il != null) inverterLogins = il.whereType<Map>().map((e) => InverterLoginItem.fromJson(e.cast<String, dynamic>())).toList();
       final uh = list('usc_history');
       if (uh != null) uscHistory = uh.whereType<Map>().map((e) => UscHistoryItem.fromJson(e.cast<String, dynamic>())).toList();
       final pr = obj('profile');
@@ -366,6 +370,14 @@ class AppState extends ChangeNotifier {
     } else {
       _p?.remove('inverter_snap');
     }
+    notifyListeners();
+  }
+
+  /// Newest first, last 50 attempts.
+  void addInverterLogin(InverterLoginItem item) {
+    inverterLogins.insert(0, item);
+    if (inverterLogins.length > 50) inverterLogins = inverterLogins.sublist(0, 50);
+    _save('inverter_logins', inverterLogins.map((e) => e.toJson()).toList());
     notifyListeners();
   }
 
@@ -553,6 +565,7 @@ class AppState extends ChangeNotifier {
     inverterCfg = InverterConfig();
     inverterSnap = null;
     uscHistory = [];
+    inverterLogins = [];
     estimatePush = null;
     lastCleaned = null;
     services = [];

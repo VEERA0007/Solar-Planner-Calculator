@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/backend_service.dart';
 import '../core/calc.dart';
+import '../core/inverter_history.dart';
 import '../core/store.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -98,6 +99,19 @@ class _InverterSyncDialogState extends State<_InverterSyncDialog> {
     );
 
     if (!mounted) return;
+    final loggedOk = res.ok && res.snapshot != null;
+    s.addInverterLogin(InverterLoginItem(
+      at: DateTime.now(),
+      brand: _brandMeta.$2,
+      authMode: authMode,
+      account: authMode == 'website'
+          ? cfg.username
+          : (cfg.customEndpoint.isNotEmpty ? 'Custom API' : InverterLoginItem.maskKey(cfg.apiKey)),
+      ok: loggedOk,
+      message: loggedOk
+          ? 'Synced ${res.snapshot!.plantName.isEmpty ? _brandMeta.$2 : res.snapshot!.plantName}'
+          : (res.error ?? 'Could not sync inverter data.'),
+    ));
     if (res.ok && res.snapshot != null) {
       s.inverterSnap = res.snapshot;
       if (res.snapshot!.ratedKw > 0) {

@@ -18,10 +18,13 @@ class UscLoad {
 class UscLink {
   final ValueNotifier<UscLoad?> load = ValueNotifier<UscLoad?>(null);
   final ValueNotifier<List<UscRecord>> saved = ValueNotifier<List<UscRecord>>(const []);
+  /// DISCOM code (e.g. TGSPDCL) chosen in the estimator. The USC panel follows it.
+  final ValueNotifier<String?> discomCode = ValueNotifier<String?>(null);
 
   void dispose() {
     load.dispose();
     saved.dispose();
+    discomCode.dispose();
   }
 }
 
@@ -30,8 +33,10 @@ class UscLink {
 class UscSection extends StatefulWidget {
   final UscSource? source;
   final void Function(UscRecord record) onApply;
+  /// Called after the user picks a different DISCOM in this panel.
+  final void Function(UscDiscom discom)? onDiscomChanged;
   final UscLink link;
-  const UscSection({super.key, required this.link, required this.onApply, this.source});
+  const UscSection({super.key, required this.link, required this.onApply, this.source, this.onDiscomChanged});
 
   @override
   State<UscSection> createState() => _UscSectionState();
@@ -83,6 +88,12 @@ class _UscSectionState extends State<UscSection> {
   void initState() {
     super.initState();
     widget.link.load.addListener(_onLoad);
+    widget.link.discomCode.addListener(_onDiscomCode);
+    final pendingDiscom = discomByCode(widget.link.discomCode.value);
+    if (pendingDiscom != null) {
+      region = pendingDiscom.region;
+      discom = pendingDiscom;
+    }
     final pending = widget.link.load.value;
     if (pending != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -94,6 +105,7 @@ class _UscSectionState extends State<UscSection> {
   @override
   void dispose() {
     widget.link.load.removeListener(_onLoad);
+    widget.link.discomCode.removeListener(_onDiscomCode);
     usc.dispose();
     captcha.dispose();
     pasteCtl.dispose();
@@ -106,6 +118,31 @@ class _UscSectionState extends State<UscSection> {
 
   UscDiscom get _d => discom ?? kDiscoms.first;
 
+  /// The estimator changed the DISCOM: show it here too. Does not notify back.
+  void _onDiscomCode() {
+    final d = discomByCode(widget.link.discomCode.value);
+    if (d == null || d == discom || !mounted) return;
+    setState(() {
+      region = d.region;
+      discom = d;
+      result = null;
+      captcha.clear();
+      captchaId = null;
+      captchaImage = null;
+      error = null;
+      notice = null;
+    });
+  }
+
+  /// Tells the estimator which DISCOM is now selected. Runs after the frame, so it is safe inside setState.
+  void _notifyDiscom() {
+    final d = discom;
+    if (d == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onDiscomChanged?.call(d);
+    });
+  }
+
   /// Shows a record sent from History or from the Units tab. Consumes the request.
   void _onLoad() {
     final req = widget.link.load.value;
@@ -115,6 +152,7 @@ class _UscSectionState extends State<UscSection> {
     setState(() {
       region = r.discom.region;
       discom = r.discom;
+      _notifyDiscom();
       usc.text = r.usc;
       error = null;
       pasteError = null;
@@ -138,6 +176,7 @@ class _UscSectionState extends State<UscSection> {
         final d = candidates.first;
         region = d.region;
         discom = d;
+        _notifyDiscom();
         result = null;
         captcha.clear();
         captchaId = null;
@@ -407,6 +446,7 @@ class _UscSectionState extends State<UscSection> {
       onTap: () => setState(() {
         region = reg;
         discom = discomsFor(reg).first;
+        _notifyDiscom();
         result = null;
         error = null;
         notice = null;
@@ -431,6 +471,7 @@ class _UscSectionState extends State<UscSection> {
       borderRadius: BorderRadius.circular(12),
       onTap: () => setState(() {
         discom = x;
+        _notifyDiscom();
         result = null;
         error = null;
         notice = null;

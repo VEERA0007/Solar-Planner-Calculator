@@ -59,6 +59,8 @@ class _EstimatorPageState extends State<EstimatorPage> {
   final bill = TextEditingController();
   final uscCtrl = TextEditingController();
   final _uscLink = UscLink();
+  final helperBillCtrl = TextEditingController();
+  bool helperOpen = false;
   final captchaCtrl = TextEditingController();
   final uscMobileCtrl = TextEditingController();
   final uscPasteCtrl = TextEditingController();
@@ -97,7 +99,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
     uscCtrl.text = p.serviceNo;
     _takePush();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _syncLiveTariff();
+      if (mounted) {
+        _uscLink.discomCode.value = _uscCodeFor(s.discom.id);
+        _syncLiveTariff();
+      }
     });
   }
 
@@ -126,7 +131,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
   @override
   void dispose() {
     for (final c in [
-      units, bill, uscCtrl, captchaCtrl, uscMobileCtrl, uscPasteCtrl, tariffOverride, roof, backup, inverterBrand,
+      units, bill, helperBillCtrl, uscCtrl, captchaCtrl, uscMobileCtrl, uscPasteCtrl, tariffOverride, roof, backup, inverterBrand,
       name, phone, address, search, exWp, exQty, exInv, exGen, customCost,
       genKw, genUse, genTariff,
     ]) {
@@ -690,23 +695,151 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   // ---------- 1. form ----------
+  /// Sleek DCR / Non-DCR pill toggle switch matching the Web App DcrToggleSwitch.
+  Widget _dcrToggle({required bool isDcr, required ValueChanged<bool> onChanged}) {
+    const amberTrack = Color(0xFFF59E0B);
+    const activeAmberText = Color(0xFFD97706);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (!isDcr) onChanged(true);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          child: Text(
+            'DCR',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+              color: isDcr ? activeAmberText : C.mute,
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 7),
+      GestureDetector(
+        onTap: () => onChanged(!isDcr),
+        child: Container(
+          width: 44,
+          height: 24,
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: amberTrack,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: AnimatedAlign(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            alignment: isDcr ? Alignment.centerLeft : Alignment.centerRight,
+            child: Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .16), blurRadius: 3, offset: const Offset(0, 1))],
+              ),
+            ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 7),
+      GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          if (isDcr) onChanged(false);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          child: Text(
+            'Non-DCR',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+              color: !isDcr ? activeAmberText : C.mute,
+            ),
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  void _showModuleGuideDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (d) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: Row(children: [
+          Icon(Icons.verified_user_outlined, color: C.amber, size: 22),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('DCR vs Non-DCR Guide', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(14)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('DCR (Subsidy Eligible)', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 13.5)),
+              const SizedBox(height: 4),
+              Text(
+                '100% Made-in-India cells & modules (ALMM). Eligible for PM Surya Ghar central subsidy up to ₹78,000 (~₹54k/kWp base).',
+                style: TextStyle(color: C.text, fontSize: 12.5, height: 1.35),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(14)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Non-DCR (Open Category)', style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 13.5)),
+              const SizedBox(height: 4),
+              Text(
+                'Tier-1 global modules with lower upfront cost (~₹42k/kWp base). Zero government subsidy; ideal for commercial or fast-track installs.',
+                style: TextStyle(color: C.text, fontSize: 12.5, height: 1.35),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 10),
+          Text(subsidyNote(_profile, dcr, sys), style: TextStyle(color: C.mute, fontSize: 12, height: 1.35)),
+        ]),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(d),
+            style: FilledButton.styleFrom(backgroundColor: C.orange),
+            child: const Text('Got it', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
+
   List<Widget> _form() {
     final plan = s.tariffCat;
     final u = _monthlyUnits;
     final quick = u > 0 ? _options(u)[SysType.onGrid] : null;
-    final book = s.book;
     final activeRate = _activeRate(u);
+    final estBill = u > 0 ? (_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u)) : 0.0;
+    final helperAmt = _num(helperBillCtrl);
+    final helperSolvedUnits = helperAmt > 0
+        ? (_num(tariffOverride) > 0 ? helperAmt / _num(tariffOverride) : plan.unitsForBill(helperAmt)).round()
+        : 0;
+    final applMonthly = s.monthlyUnits;
 
     return [
-      // USC / DISCOM bill lookup. Fetches directly from the DISCOM portals.
+      // 1. USC / DISCOM bill lookup (screenshot panel). Fetches directly from the DISCOM portals.
       Panel(
         child: UscSection(
           link: _uscLink,
           source: const DirectUscSource(),
           onApply: _applyUsc,
+          onDiscomChanged: _onUscDiscom,
         ),
       ),
       _gap(),
+
+      // 2. Monthly Bills & Units Enquiry
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter your monthly units or a bill amount'),
@@ -728,7 +861,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('${s.st.name('en').split(' ').first.toUpperCase()} · ${plan.slabLabel(u)}', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 4),
-                Text('${u.round()} kWh → ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo (₹${(_num(tariffOverride) > 0 ? _num(tariffOverride) : plan.average(u)).toStringAsFixed(2)}/kWh avg)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                Text('${u.round()} kWh → ₹${groupIndian(estBill)}/mo (₹${(u > 0 ? estBill / u : 0).toStringAsFixed(2)}/kWh avg)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
                 if (quick != null) ...[
                   const SizedBox(height: 4),
                   Text('Suggested: ${quick.kwp.toStringAsFixed(2)} kWp (${quick.panels} × ${_panel.wp}W)', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 14)),
@@ -765,29 +898,127 @@ class _EstimatorPageState extends State<EstimatorPage> {
           ]),
           if (mode == 'units') ...[
             const SizedBox(height: 10),
-            InkWell(
-              onTap: () => setState(() => mode = 'bill'),
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: C.amber.withValues(alpha: .1), borderRadius: BorderRadius.circular(14), border: Border.all(color: C.amber.withValues(alpha: .35))),
-                child: Row(children: [
-                  const Expanded(child: Text("Don't know your exact units? Calculate from bill", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
-                  Icon(Icons.expand_more, color: C.mute),
-                ]),
+            Container(
+              decoration: BoxDecoration(
+                color: C.amber.withValues(alpha: .10),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: C.amber.withValues(alpha: .35)),
               ),
+              child: Column(children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => setState(() => helperOpen = !helperOpen),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(children: [
+                      const Expanded(child: Text("Don't know your exact units? Calculate from bill", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
+                      Icon(helperOpen ? Icons.expand_less : Icons.expand_more, color: C.amber, size: 19),
+                    ]),
+                  ),
+                ),
+                if (helperOpen) ...[
+                  Divider(height: 1, color: C.amber.withValues(alpha: .28)),
+                  Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Expanded(
+                          child: TextField(
+                            controller: helperBillCtrl,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            onChanged: (_) => setState(() {}),
+                            decoration: InputDecoration(
+                              prefixText: '₹ ',
+                              hintText: 'e.g. 4800',
+                              isDense: true,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: helperSolvedUnits > 0
+                              ? () => setState(() {
+                                    mode = 'units';
+                                    units.text = '$helperSolvedUnits';
+                                    bill.text = helperAmt.round().toString();
+                                    helperOpen = false;
+                                  })
+                              : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: C.orange,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(0, 48),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: Text('Apply ($helperSolvedUnits units)', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+                        ),
+                      ]),
+                      if (applMonthly > 0) ...[
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          Expanded(
+                            child: Text('From Appliance Calculator: ${applMonthly.round()} kWh', style: TextStyle(color: C.mute, fontSize: 11.5, fontWeight: FontWeight.w600)),
+                          ),
+                          GestureDetector(
+                            onTap: () => setState(() {
+                              mode = 'units';
+                              units.text = '${applMonthly.round()}';
+                              helperOpen = false;
+                            }),
+                            child: Text('Use Appliance Total', style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 11.5)),
+                          ),
+                        ]),
+                      ],
+                    ]),
+                  ),
+                ],
+              ]),
             ),
           ],
         ]),
       ),
+
+      // 3. Analyzed usage for the selected DISCOM
+      if (u > 0) ...[
+        _gap(),
+        Panel(
+          child: Row(children: [
+            Icon(Icons.check_circle_outline, color: C.green, size: 19),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Analyzed ${s.discom.name} Usage: ${groupIndian(u)} kWh · ₹${groupIndian(estBill)}/mo',
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+              decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)),
+              child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5)),
+            ),
+          ]),
+        ),
+      ],
       _gap(),
+
+      // 4. Electricity cost (follows the selected DISCOM) and roof area
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Expanded(child: Text('Electricity Cost Per Unit (₹/kWh)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-            Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text(s.discom.name, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
-          ]),
+          const Text('Electricity Cost Per Unit (₹/kWh)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
           const SizedBox(height: 8),
+          DropdownButtonFormField<String>(
+            key: ValueKey('est_dc_${s.prefs.stateId}_${s.prefs.discomId}'),
+            initialValue: s.discom.id,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'DISCOM', isDense: true),
+            items: [for (final d in s.st.discoms) DropdownMenuItem(value: d.id, child: Text(d.name, overflow: TextOverflow.ellipsis))],
+            onChanged: (v) {
+              if (v != null) _setTariffDiscom(v);
+            },
+          ),
+          const SizedBox(height: 10),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -822,10 +1053,13 @@ class _EstimatorPageState extends State<EstimatorPage> {
               style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), foregroundColor: C.orange, side: BorderSide(color: C.orange.withValues(alpha: .6))),
             ),
           ]),
-          if (roofTrace != null) _note(Icons.roofing, C.green, 'Traced roof: ${roofTrace!.areaM2.toStringAsFixed(1)} m². It fits ${roofTrace!.panels} panels (${roofTrace!.kwp.toStringAsFixed(2)} kWp).'),
+          if (roofTrace != null)
+            _note(Icons.roofing, C.green, 'Traced roof: ${roofTrace!.areaM2.toStringAsFixed(1)} m². It fits ${roofTrace!.panels} panels (${roofTrace!.kwp.toStringAsFixed(2)} kWp).'),
         ]),
       ),
       _gap(),
+
+      // 5. System type
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -848,18 +1082,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+
+      // 6. Installation category and module
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (u > 0)
-            Row(children: [
-              Icon(Icons.check_circle_outline, color: C.green, size: 19),
-              const SizedBox(width: 6),
-              Expanded(child: Text('Analyzed Usage: ${u.round()} kWh · ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
-            ])
-          else
-            Text('Enter units or a bill above.', style: TextStyle(color: C.mute)),
-          _gap(),
           Row(children: [
             CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('1', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
             const SizedBox(width: 8),
@@ -871,12 +1097,12 @@ class _EstimatorPageState extends State<EstimatorPage> {
               setState(() => category = 'residential');
               s.prefs.category = 'domestic';
               s.savePrefs();
-            }, sub: 'Open Capex'),
+            }, sub: dcr ? 'Govt Subsidy' : 'Open Capex'),
             _chip('Commercial', category == 'commercial', () {
               setState(() => category = 'commercial');
               s.prefs.category = 'commercial';
               s.savePrefs();
-            }, sub: 'Lower Cost'),
+            }, sub: dcr ? 'ALMM Spec' : 'Lower Cost'),
             _chip('Industrial', category == 'industrial', () {
               setState(() => category = 'industrial');
               s.prefs.category = 'industrial';
@@ -886,22 +1112,26 @@ class _EstimatorPageState extends State<EstimatorPage> {
           ]),
           _gap(),
           Row(children: [
-            CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('2', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
-            const SizedBox(width: 8),
-            const Expanded(child: Text('Select The Module', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-            Text('DCR', style: TextStyle(color: C.orange, fontWeight: FontWeight.w800, fontSize: 13)),
-            Switch(
-              value: !dcr,
-              onChanged: (v) => setState(() {
-                dcr = !v;
+            CircleAvatar(radius: 11, backgroundColor: C.text, child: const Text('2', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
+            const SizedBox(width: 6),
+            Icon(Icons.verified_user_outlined, color: C.amber, size: 16),
+            const SizedBox(width: 5),
+            const Flexible(child: Text('Select The Module', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+            const SizedBox(width: 5),
+            GestureDetector(
+              onTap: _showModuleGuideDialog,
+              child: Icon(Icons.info_outline, color: C.sky, size: 17),
+            ),
+            const Spacer(),
+            _dcrToggle(
+              isDcr: dcr,
+              onChanged: (nextDcr) => setState(() {
+                dcr = nextDcr;
                 panelIdx = 1;
               }),
-              thumbColor: const WidgetStatePropertyAll(Colors.white),
-              trackColor: WidgetStatePropertyAll(C.amber),
-              trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
             ),
-            Text('Non-DCR', style: TextStyle(color: C.text, fontWeight: FontWeight.w800, fontSize: 13)),
           ]),
+          const SizedBox(height: 6),
           Text(subsidyNote(_profile, dcr, sys), style: TextStyle(color: C.mute, fontSize: 12, height: 1.35)),
         ]),
       ),
@@ -931,6 +1161,32 @@ class _EstimatorPageState extends State<EstimatorPage> {
       ),
     ];
   }
+
+  /// Switches the tariff DISCOM, re-syncs the USC panel to it, and fetches its live rate.
+  void _setTariffDiscom(String id) {
+    if (id == s.prefs.discomId) return;
+    s.prefs.discomId = id;
+    s.savePrefs();
+    _uscLink.discomCode.value = _uscCodeFor(id);
+    setState(() {});
+    _syncLiveTariff();
+  }
+
+  /// The USC panel picked a DISCOM: the electricity rate follows it.
+  void _onUscDiscom(UscDiscom d) {
+    final id = _tariffIdFor(d.code);
+    if (id != null) _setTariffDiscom(id);
+  }
+
+  String? _tariffIdFor(String uscCode) {
+    final c = uscCode.toLowerCase();
+    for (final d in s.st.discoms) {
+      if (d.id.toLowerCase() == c) return d.id;
+    }
+    return null;
+  }
+
+  String? _uscCodeFor(String tariffId) => discomByCode(tariffId.toUpperCase())?.code;
 
   /// One line per tariff slab so the customer can follow the bill.
   List<Widget> _slabLines(CategoryTariff plan, double u) {

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'core/i18n.dart';
+import 'core/geo.dart';
 import 'core/store.dart';
 import 'core/update.dart';
 import 'ui/appliance_page.dart';
@@ -36,6 +37,7 @@ class _SolarAppState extends State<SolarApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     state.load().then((_) async {
+      await askLocationOnceAtStart(); // single permission prompt at launch, before the first GPS read
       _autoUpdateCheck();
       await state.sync();
       if (state.site.auto) state.locate(); // refreshes place, state and sun data from GPS when allowed
@@ -129,7 +131,8 @@ class Shell extends StatelessWidget {
           body: SafeArea(
             child: Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
+                // Phones and tablets keep a readable column; desktop windows use the full width.
+                constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width >= 900 ? double.infinity : 760),
                 child: IndexedStack(index: state.tab, children: pages),
               ),
             ),

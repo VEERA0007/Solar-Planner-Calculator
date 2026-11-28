@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Open Location Code ("plus code") encoder.
 const _alphabet = '23456789CFGHJMPQRVWX';
@@ -47,11 +48,26 @@ class Place {
   }
 }
 
-Future<Place?> currentPlace() async {
+/// Asks for location once per install, when the app starts. Later starts only read the
+/// permission state, so the system prompt never comes back on its own.
+Future<void> askLocationOnceAtStart() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('locationAskedV1') ?? false) return;
+    await prefs.setBool('locationAskedV1', true);
+    if (!await Geolocator.isLocationServiceEnabled()) return;
+    if (await Geolocator.checkPermission() == LocationPermission.denied) {
+      await Geolocator.requestPermission();
+    }
+  } catch (_) {}
+}
+
+/// [ask] is true only when the user taps "Use my location", so the prompt appears on that tap.
+Future<Place?> currentPlace({bool ask = false}) async {
   try {
     if (!await Geolocator.isLocationServiceEnabled()) return null;
     var p = await Geolocator.checkPermission();
-    if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
+    if (p == LocationPermission.denied && ask) p = await Geolocator.requestPermission();
     if (p == LocationPermission.denied || p == LocationPermission.deniedForever) return null;
     final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(accuracy: LocationAccuracy.low))

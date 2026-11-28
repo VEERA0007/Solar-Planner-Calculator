@@ -8,9 +8,12 @@ import '../core/estimator_data.dart';
 import '../core/service_data.dart';
 import '../core/store.dart';
 import '../core/tariff.dart';
+import '../core/usc.dart';
+import '../core/usc_direct.dart';
 import 'pdf_quote.dart';
 import 'roof_map.dart';
 import 'theme.dart';
+import 'usc_section.dart';
 
 /// Solar Estimator: New Install (with 4-state USC bill fetch, inline tariff/DISCOM
 /// selector, custom rate override, roof map, BOM, ROI & Customer page),
@@ -55,6 +58,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
   final units = TextEditingController(text: '400');
   final bill = TextEditingController();
   final uscCtrl = TextEditingController();
+  final _uscLink = UscLink();
   final captchaCtrl = TextEditingController();
   final uscMobileCtrl = TextEditingController();
   final uscPasteCtrl = TextEditingController();
@@ -92,12 +96,31 @@ class _EstimatorPageState extends State<EstimatorPage> {
     address.text = p.address;
     uscCtrl.text = p.serviceNo;
     _takePush();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncLiveTariff();
+    });
   }
 
   @override
   void didUpdateWidget(covariant EstimatorPage old) {
     super.didUpdateWidget(old);
     if (s.estimatePush != null) setState(_takePush);
+  }
+
+  /// Copies a fetched USC record into the estimator: units or bill, customer name and address.
+  void _applyUsc(UscRecord r) {
+    setState(() {
+      uscCtrl.text = r.usc;
+      if (r.avgUnits > 0) {
+        mode = 'units';
+        units.text = r.avgUnits.round().toString();
+      } else if (r.avgBill > 0) {
+        mode = 'bill';
+        bill.text = r.avgBill.round().toString();
+      }
+      if (r.consumerName.isNotEmpty) name.text = r.consumerName;
+      if (r.address.isNotEmpty) address.text = r.address;
+    });
   }
 
   @override
@@ -109,6 +132,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     ]) {
       c.dispose();
     }
+    _uscLink.dispose();
     super.dispose();
   }
 
@@ -405,7 +429,9 @@ class _EstimatorPageState extends State<EstimatorPage> {
     }
   }
 
+  /// Rate is set by the DISCOM sync, never typed by the user. Quiet on failure: the official slab table is used.
   Future<void> _syncLiveTariff() async {
+    if (syncingTariff) return;
     setState(() => syncingTariff = true);
     final res = await BackendService.fetchRealtimeTariff(
       rawBaseUrl: s.prefs.backendUrl,
@@ -418,9 +444,8 @@ class _EstimatorPageState extends State<EstimatorPage> {
     setState(() => syncingTariff = false);
     if (res.ok && res.rate != null) {
       setState(() => tariffOverride.text = res.rate!.toStringAsFixed(2));
-      toast(context, 'Live tariff synced: ₹${res.rate!.toStringAsFixed(2)}/kWh');
     } else {
-      toast(context, 'Using official ${s.st.name('en')} slab table (${s.st.order})');
+      setState(() => tariffOverride.text = '');
     }
   }
 
@@ -673,256 +698,13 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final activeRate = _activeRate(u);
 
     return [
-      // Collapsible 4-State Live USC / DISCOM Bill Fetch Panel
+      // USC / DISCOM bill lookup. Fetches directly from the DISCOM portals.
       Panel(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          InkWell(
-            onTap: () => setState(() => uscOpen = !uscOpen),
-            child: Row(children: [
-              Container(width: 38, height: 38, decoration: BoxDecoration(color: C.chipBlue, shape: BoxShape.circle), child: Icon(Icons.electric_meter_outlined, color: C.sky, size: 20)),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('USC / DISCOM Live Bill Fetch', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                  Text('${s.st.name('en')} · ${s.discom.name} (Auto-fill 12-mo units)', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: C.mute, fontSize: 12)),
-                ]),
-              ),
-              Icon(uscOpen ? Icons.expand_less : Icons.expand_more, color: C.mute),
-            ]),
-          ),
-          if (uscOpen) ...[
-            const SizedBox(height: 12),
-            if (book != null) ...[
-              Row(children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey('est_st_${s.prefs.stateId}'),
-                    initialValue: s.prefs.stateId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'State', isDense: true),
-                    items: [for (final x in book.states) DropdownMenuItem(value: x.id, child: Text(x.name('en'), overflow: TextOverflow.ellipsis))],
-                    onChanged: (v) {
-                      if (v == null) return;
-                      s.chooseState(v);
-                      s.savePrefs();
-                      setState(() {
-                        uscCaptcha = null;
-                        uscNeedsMobile = false;
-                        uscMsg = '';
-                        uscMeta = '';
-                        uscEbillUrl = '';
-                      });
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey('est_dc_${s.prefs.stateId}_${s.prefs.discomId}'),
-                    initialValue: s.discom.id,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'DISCOM', isDense: true),
-                    items: [for (final d in s.st.discoms) DropdownMenuItem(value: d.id, child: Text(d.name, overflow: TextOverflow.ellipsis))],
-                    onChanged: (v) {
-                      if (v == null) return;
-                      s.prefs.discomId = v;
-                      s.savePrefs();
-                      setState(() {
-                        uscCaptcha = null;
-                        uscNeedsMobile = false;
-                        uscMsg = '';
-                        uscMeta = '';
-                        uscEbillUrl = '';
-                      });
-                    },
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 10),
-            ],
-            Row(children: [
-              Expanded(
-                child: TextField(
-                  controller: uscCtrl,
-                  onSubmitted: (_) => _fetchUsc(),
-                  decoration: const InputDecoration(labelText: 'USC / Service Number', hintText: 'e.g. 102938475', isDense: true),
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: fetchingUsc ? null : () => _fetchUsc(),
-                style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.blue),
-                child: Text(fetchingUsc ? '...' : 'Fetch', style: const TextStyle(fontWeight: FontWeight.w800)),
-              ),
-            ]),
-            if (uscCaptcha != null) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: C.chipBlue,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: C.blue.withValues(alpha: .4)),
-                ),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    Icon(Icons.verified_user_outlined, color: C.blue, size: 17),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        '${uscCaptcha!.provider} Portal Security Check',
-                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-                      ),
-                    ),
-                    TextButton.icon(
-                      onPressed: uscRefreshingCaptcha ? null : _refreshCaptcha,
-                      icon: const Icon(Icons.refresh, size: 15),
-                      label: Text(uscRefreshingCaptcha ? 'Loading...' : 'New Code', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                    ),
-                  ]),
-                  if (uscCaptcha!.imageBytes != null) ...[
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: C.line),
-                      ),
-                      child: Image.memory(uscCaptcha!.imageBytes!, height: 46, fit: BoxFit.contain),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    Expanded(
-                      child: TextField(
-                        controller: captchaCtrl,
-                        onSubmitted: (_) => _fetchUsc(withCaptcha: true),
-                        decoration: const InputDecoration(
-                          labelText: 'Security Code',
-                          hintText: 'Type code shown above',
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: fetchingUsc ? null : () => _fetchUsc(withCaptcha: true),
-                      style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.green),
-                      child: Text(fetchingUsc ? '...' : 'Verify', style: const TextStyle(fontWeight: FontWeight.w800)),
-                    ),
-                  ]),
-                ]),
-              ),
-            ],
-            if (uscNeedsMobile || s.discom.id == 'apspdcl') ...[
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(
-                  child: TextField(
-                    controller: uscMobileCtrl,
-                    keyboardType: TextInputType.phone,
-                    maxLength: 10,
-                    decoration: InputDecoration(
-                      labelText: uscNeedsMobile ? 'Linked 10-Digit Mobile (Required)' : 'Linked 10-Digit Mobile (Optional for APSPDCL)',
-                      hintText: '10-digit mobile linked to USC',
-                      counterText: '',
-                      isDense: true,
-                    ),
-                  ),
-                ),
-                if (uscNeedsMobile) ...[
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: fetchingUsc ? null : () => _fetchUsc(),
-                    style: FilledButton.styleFrom(minimumSize: const Size(0, 48), backgroundColor: C.orange),
-                    child: const Text('Submit', style: TextStyle(fontWeight: FontWeight.w800)),
-                  ),
-                ],
-              ]),
-            ],
-            const SizedBox(height: 8),
-            Wrap(spacing: 8, runSpacing: 6, children: [
-              OutlinedButton.icon(
-                onPressed: () => _open(s.discom.url),
-                icon: const Icon(Icons.open_in_new, size: 15),
-                label: Text('Open ${s.discom.name} Portal', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => setState(() => uscPasteOpen = !uscPasteOpen),
-                icon: const Icon(Icons.content_paste_go_outlined, size: 15),
-                label: Text(uscPasteOpen ? 'Hide Paste' : 'Paste Bills', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-              ),
-              if (uscEbillUrl.isNotEmpty)
-                OutlinedButton.icon(
-                  onPressed: () => _open(uscEbillUrl),
-                  icon: const Icon(Icons.receipt_long_outlined, size: 15),
-                  label: const Text('Official e-Bill', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
-                ),
-              for (final h in s.uscHistory.take(3))
-                ActionChip(
-                  label: Text('${h.usc} (${h.avgMonthlyUnits.round()} U)', style: const TextStyle(fontSize: 12)),
-                  onPressed: () => setState(() {
-                    uscCtrl.text = h.usc;
-                    if (h.avgMonthlyUnits > 0) {
-                      mode = 'units';
-                      units.text = h.avgMonthlyUnits.round().toString();
-                    }
-                    if (h.consumerName.isNotEmpty) name.text = h.consumerName;
-                  }),
-                ),
-            ]),
-            if (uscPasteOpen) ...[
-              const SizedBox(height: 8),
-              TextField(
-                controller: uscPasteCtrl,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Paste portal bill rows (Month  Units  Amount)',
-                  hintText: 'Nov 2025  360  2480\nDec 2025  310  2090',
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 6),
-              FilledButton(
-                onPressed: _applyPastedBills,
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), backgroundColor: C.blue),
-                child: const Text('Apply Pasted Monthly Units', style: TextStyle(fontWeight: FontWeight.w800)),
-              ),
-            ],
-            if (uscMsg.isNotEmpty)
-              _note(
-                uscErr ? Icons.info_outline : (uscCaptcha != null || uscNeedsMobile ? Icons.verified_user_outlined : Icons.check_circle_outline),
-                uscErr ? C.amber : (uscCaptcha != null || uscNeedsMobile ? C.blue : C.green),
-                uscMeta.isNotEmpty && !uscErr ? '$uscMsg\n$uscMeta' : uscMsg,
-              ),
-            if (uscMonths.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 58,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    for (final m in uscMonths.take(12))
-                      Container(
-                        margin: const EdgeInsets.only(right: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: m.verified ? C.green.withValues(alpha: .08) : C.card2,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: m.verified ? C.green.withValues(alpha: .45) : C.line),
-                        ),
-                        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Text(m.month, style: TextStyle(color: C.mute, fontSize: 10.5, fontWeight: FontWeight.w700)),
-                          Text('${m.units.round()} U', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
-                        ]),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        ]),
+        child: UscSection(
+          link: _uscLink,
+          source: const DirectUscSource(),
+          onApply: _applyUsc,
+        ),
       ),
       _gap(),
       Panel(
@@ -1006,23 +788,25 @@ class _EstimatorPageState extends State<EstimatorPage> {
             Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text(s.discom.name, style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
           ]),
           const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-              child: _field(
-                tariffOverride,
-                'Custom ₹/kWh (blank = auto ${activeRate.toStringAsFixed(2)})',
-                hint: activeRate.toStringAsFixed(2),
-                prefix: '₹ ',
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: C.chipGreen,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: C.green.withValues(alpha: .35)),
+            ),
+            child: Row(children: [
+              Expanded(
+                child: Text('₹ ${activeRate.toStringAsFixed(2)} / kWh',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: C.green)),
               ),
-            ),
-            const SizedBox(width: 8),
-            OutlinedButton.icon(
-              onPressed: syncingTariff ? null : _syncLiveTariff,
-              icon: const Icon(Icons.sync, size: 17),
-              label: Text(syncingTariff ? '...' : 'Sync', style: const TextStyle(fontWeight: FontWeight.w800)),
-              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), foregroundColor: C.green, side: BorderSide(color: C.green.withValues(alpha: .6))),
-            ),
-          ]),
+              Icon(syncingTariff ? Icons.sync : Icons.verified_outlined, size: 16, color: C.green),
+              const SizedBox(width: 5),
+              Text(syncingTariff ? 'Syncing…' : 'Auto-synced by DISCOM',
+                  style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 11.5)),
+            ]),
+          ),
           const SizedBox(height: 6),
           Text('${s.st.order}. Effective ${s.st.effective}. Auto slab: ₹${(u > 0 ? plan.marginal(u) : s.unitPrice).toStringAsFixed(2)}/kWh.', style: TextStyle(color: C.mute, fontSize: 11.5, height: 1.3)),
           _gap(),

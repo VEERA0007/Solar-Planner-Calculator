@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -400,4 +401,17 @@ PastedBills parsePastedBills(String text) {
   }
   rows.sort((a, b) => _monthKey(a.month).compareTo(_monthKey(b.month)));
   return PastedBills(rows, skipped);
+}
+
+/// Turns the captcha image from the portal into bytes. Accepts a data URL or plain base64.
+/// Returns null when the text can't be decoded, so the form shows no image instead of failing.
+Uint8List? decodeCaptchaImage(String image) {
+  if (image.isEmpty) return null;
+  final comma = image.indexOf(',');
+  final raw = image.startsWith('data:') && comma >= 0 ? image.substring(comma + 1) : image;
+  try {
+    return base64Decode(raw);
+  } catch (_) {
+    return null;
+  }
 }

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/calc.dart';
 import '../core/sun.dart';
+import '../core/store_consts.dart';
 
 /// Verified rooftop or surrounding obstacle for real-time 2D/3D shadow, heatmap, and PVsyst simulation.
 class RoofObstacle {

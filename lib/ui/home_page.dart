@@ -334,7 +334,7 @@ class _HomePageState extends State<HomePage> {
                 Text(
                   snap == null
                       ? 'Manufacturer Website Login · API Integration'
-                      : '${snap.currentKw.toStringAsFixed(2)} kW live · ${fmt1(snap.todayKwh)} kWh today · Logger ${snap.loggerStatus}',
+                      : '${fmtPowerKw(snap.currentKw)} live · ${fmtEnergyKwh(snap.todayKwh)} today · Logger ${snap.loggerStatus}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: snap != null ? C.green : C.mute, fontSize: 12),
@@ -637,49 +637,61 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Makes a past inverter account the active one, shows its last data, and syncs it.
-  Future<void> _useInverterLogin(AppState s, InverterLoginItem e) async {
+  /// Tapping an account shows its stored data at once. No login is needed.
+  void _useInverterAccount(AppState s, InverterLoginItem e) {
     if (e.cfg != null) s.inverterCfg = e.cfg!;
     s.inverterSnap = e.snap;
     s.saveInverter();
     setState(() {});
-    await showInverterSyncDialog(context, s, autoSync: true);
-    if (mounted) setState(() {});
   }
 
-  /// Inverter login attempts, newest first. Passwords are never stored.
+  /// Inverter accounts, one row each. Passwords are never stored.
   Widget _inverterLoginHistory(AppState s) {
-    final items = s.inverterLogins.take(10).toList();
+    final items = s.inverterLogins;
     return Panel(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          CircleAvatar(radius: 18, backgroundColor: C.chipBlue, child: Icon(Icons.login, color: C.blue, size: 19)),
+          CircleAvatar(radius: 18, backgroundColor: C.chipBlue, child: Icon(Icons.manage_accounts_outlined, color: C.blue, size: 19)),
           const SizedBox(width: 10),
-          const Expanded(child: Text('Inverter Login History', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
-          Text('${s.inverterLogins.length} attempts', style: TextStyle(color: C.mute, fontSize: 12)),
+          const Expanded(child: Text('Inverter Accounts', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
+          Text('${items.length} saved', style: TextStyle(color: C.mute, fontSize: 12)),
         ]),
         const SizedBox(height: 10),
         if (items.isEmpty)
-          Text('No inverter logins yet. Use Inverter Live Sync to log in.', style: TextStyle(color: C.mute, fontSize: 12.5))
+          Text('No inverter accounts yet. Log in once in Manage Inverter and it is saved here.', style: TextStyle(color: C.mute, fontSize: 12.5))
         else
           for (final e in items)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: InkWell(
                 borderRadius: BorderRadius.circular(12),
-                onTap: () => _useInverterLogin(s, e),
+                onTap: () => _useInverterAccount(s, e),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Icon(e.ok ? Icons.check_circle_outline : Icons.error_outline, color: e.ok ? C.green : C.red, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('${e.brand} · ${e.account.isEmpty ? '-' : e.account}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                    Text(e.message, style: TextStyle(color: C.mute, fontSize: 11.5), maxLines: 2, overflow: TextOverflow.ellipsis),
-                  ]),
-                ),
-                const SizedBox(width: 8),
-                Text('${_two(e.at.day)}/${_two(e.at.month)} ${_two(e.at.hour)}:${_two(e.at.minute)}', style: TextStyle(color: C.mute, fontSize: 11)),
-              ]),
+                  Icon(e.ok ? Icons.check_circle_outline : Icons.error_outline, color: e.ok ? C.green : C.red, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${e.brand} · ${e.account.isEmpty ? '-' : e.account}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                      Text(
+                        e.snap == null
+                            ? e.message
+                            : '${fmtPowerKw(e.snap!.currentKw)} · ${fmtEnergyKwh(e.snap!.todayKwh)} today · ${e.snap!.plantName}',
+                        style: TextStyle(color: C.mute, fontSize: 11.5),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ]),
+                  ),
+                  IconButton(
+                    tooltip: 'Sync this account',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () {
+                      _useInverterAccount(s, e);
+                      showInverterSyncDialog(context, s, autoSync: true);
+                    },
+                    icon: Icon(Icons.sync, color: C.blue, size: 18),
+                  ),
+                ]),
               ),
             ),
       ]),

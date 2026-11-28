@@ -248,3 +248,9 @@ String fmt1(num n) {
   final frac = ((v - whole).abs() * 10).round();
   return frac == 0 ? groupIndian(v) : '${groupIndian(whole)}.$frac';
 }
+
+/// Power as W below 1 kW, otherwise kW (2 decimals).
+String fmtPowerKw(double kw) => kw.abs() < 1 ? '${groupIndian((kw * 1000).round())} W' : '${kw.toStringAsFixed(2)} kW';
+
+/// Energy as kWh below 1,000 kWh, otherwise MWh (2 decimals).
+String fmtEnergyKwh(double kwh) => kwh.abs() < 1000 ? '${kwh.toStringAsFixed(2)} kWh' : '${(kwh / 1000).toStringAsFixed(2)} MWh';

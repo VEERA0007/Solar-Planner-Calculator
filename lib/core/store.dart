@@ -373,10 +373,27 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Newest first, last 50 attempts.
+  /// One entry per account. A new login for the same account updates it, and a failed
+  /// login keeps the last good data.
   void addInverterLogin(InverterLoginItem item) {
-    inverterLogins.insert(0, item);
-    if (inverterLogins.length > 50) inverterLogins = inverterLogins.sublist(0, 50);
+    final prev = inverterLogins.where((x) => x.key == item.key).firstOrNull;
+    inverterLogins.removeWhere((x) => x.key == item.key);
+    final keepSnap = item.snap ?? prev?.snap;
+    final keepCfg = item.cfg ?? prev?.cfg;
+    inverterLogins.insert(
+      0,
+      InverterLoginItem(
+        at: item.at,
+        brand: item.brand,
+        authMode: item.authMode,
+        account: item.account,
+        ok: item.ok,
+        message: item.message,
+        cfg: keepCfg,
+        snap: keepSnap,
+      ),
+    );
+    if (inverterLogins.length > 30) inverterLogins = inverterLogins.sublist(0, 30);
     _save('inverter_logins', inverterLogins.map((e) => e.toJson()).toList());
     notifyListeners();
   }

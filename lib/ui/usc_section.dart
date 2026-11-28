@@ -258,7 +258,7 @@ class _UscSectionState extends State<UscSection> {
   }
 
   Future<void> _saveToHistory(UscRecord r) async {
-    final next = [r, ...widget.link.saved.value.where((s) => !(s.usc == r.usc && s.discom.code == r.discom.code))];
+    final next = [r, ...widget.link.saved.value.where((s) => s.usc != r.usc)];
     widget.link.saved.value = next;
     await UscStore.save(next);
   }
@@ -854,17 +854,25 @@ class _UscSectionState extends State<UscSection> {
 }
 
 /// "USC History": saved lookups for quick re-runs or audits. Shown at the bottom of the page.
-class UscHistory extends StatelessWidget {
+class UscHistory extends StatefulWidget {
   final UscLink link;
   final void Function(UscLoad request) onOpen;
   const UscHistory({super.key, required this.link, required this.onOpen});
 
   @override
+  State<UscHistory> createState() => _UscHistoryState();
+}
+
+class _UscHistoryState extends State<UscHistory> {
+  String? selected; // USC number chosen in the dropdown
+
+  @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<List<UscRecord>>(
-      valueListenable: link.saved,
+      valueListenable: widget.link.saved,
       builder: (context, saved, _) {
         if (saved.isEmpty) return const SizedBox.shrink();
+        final current = saved.where((x) => x.usc == selected).firstOrNull;
         return Panel(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
@@ -873,65 +881,60 @@ class UscHistory extends StatelessWidget {
               const Expanded(child: Text('USC History', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15))),
               uscPill('${saved.length} Saved', C.mute),
             ]),
-            const SizedBox(height: 6),
-            Text('Previously fetched USC accounts for quick re-runs or audits', style: TextStyle(color: C.mute, fontSize: 12.5, height: 1.35)),
             const SizedBox(height: 12),
-            for (final s in saved) _item(context, s, saved),
+            DropdownButtonFormField<String>(
+              key: ValueKey('usc_hist_${saved.length}'),
+              initialValue: current?.usc,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Choose a saved USC account', isDense: true),
+              items: [
+                for (final r in saved)
+                  DropdownMenuItem(
+                    value: r.usc,
+                    child: Text(
+                      'USC ${r.usc} · ${r.discom.code} · ${r.verifiedMonths}/${r.months.length} months',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (v) {
+                final r = saved.where((x) => x.usc == v).firstOrNull;
+                if (r == null) return;
+                setState(() => selected = v);
+                // Picking an account re-runs its fetch at once.
+                widget.onOpen(UscLoad(r, refetch: true));
+              },
+            ),
+            if (current != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                '${current.consumerName.isEmpty ? 'Consumer' : current.consumerName} · Avg ${current.avgUnits.round()} kWh/mo · ₹${groupIndian(current.avgBill.round())}/mo',
+                style: TextStyle(color: C.mute, fontSize: 12.5),
+              ),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(backgroundColor: C.chipBlue, foregroundColor: C.blue),
+                    onPressed: () => widget.onOpen(UscLoad(current)),
+                    child: const Text('Load in Audit'),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Delete',
+                  onPressed: () async {
+                    final next = saved.where((x) => x.usc != current.usc).toList();
+                    widget.link.saved.value = next;
+                    setState(() => selected = null);
+                    await UscStore.save(next);
+                  },
+                  icon: Icon(Icons.delete_outline, color: C.mute),
+                ),
+              ]),
+            ],
           ]),
         );
       },
-    );
-  }
-
-  Widget _item(BuildContext context, UscRecord s, List<UscRecord> saved) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => onOpen(UscLoad(s, refetch: true)),
-        child: Panel(
-        radius: 16,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(child: Text('USC #${s.usc}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14))),
-            uscPill(s.discom.code, C.amber),
-            const SizedBox(width: 6),
-            uscPill('${s.verifiedMonths}/${s.months.length} Verified', C.green),
-            IconButton(
-              tooltip: 'Delete',
-              onPressed: () async {
-                final next = saved.where((x) => !(x.usc == s.usc && x.discom.code == s.discom.code)).toList();
-                link.saved.value = next;
-                await UscStore.save(next);
-              },
-              icon: Icon(Icons.delete_outline, color: C.mute),
-            ),
-          ]),
-          const SizedBox(height: 6),
-          Text('${s.consumerName.isEmpty ? 'Consumer' : s.consumerName} · Avg ${s.avgUnits.round()} kWh/mo · ₹${groupIndian(s.avgBill.round())}/mo',
-              style: TextStyle(color: C.mute, fontSize: 12.5)),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: C.orange, foregroundColor: Colors.white),
-                onPressed: () => onOpen(UscLoad(s, refetch: true)),
-                icon: const Icon(Icons.play_arrow, size: 18),
-                label: const Text('Re-Run Fetch'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton(
-                style: OutlinedButton.styleFrom(backgroundColor: C.chipBlue, foregroundColor: C.blue),
-                onPressed: () => onOpen(UscLoad(s)),
-                child: const Text('Load in Audit'),
-              ),
-            ),
-          ]),
-        ]),
-      ),
-      ),
     );
   }
 }

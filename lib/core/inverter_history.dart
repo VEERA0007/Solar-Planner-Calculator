@@ -25,6 +25,9 @@ class InverterLoginItem {
   });
 
   /// Shows only the last 4 characters of an API key.
+  /// Identifies one account: brand, mode and username (or masked key). Same account = same entry.
+  String get key => '$brand|$authMode|$account';
+
   static String maskKey(String key) => key.length <= 4 ? '••••' : '••••${key.substring(key.length - 4)}';
 
   Map<String, dynamic> toJson() => {

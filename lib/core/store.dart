@@ -398,6 +398,17 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Deletes a saved inverter account. If it is the active one, its data is cleared.
+  void removeInverterAccount(InverterLoginItem item) {
+    inverterLogins.removeWhere((x) => x.key == item.key);
+    if (inverterCfg.brand == item.brand && inverterCfg.username == item.account && inverterCfg.authMode == item.authMode) {
+      inverterSnap = null;
+      saveInverter();
+    }
+    _save('inverter_logins', inverterLogins.map((e) => e.toJson()).toList());
+    notifyListeners();
+  }
+
   void clearInverter() {
     inverterSnap = null;
     _p?.remove('inverter_snap');

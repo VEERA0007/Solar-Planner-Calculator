@@ -128,7 +128,7 @@ class _InverterSyncDialogState extends State<_InverterSyncDialog> {
     final loggedOk = res.ok && res.snapshot != null;
     s.addInverterLogin(InverterLoginItem(
       at: DateTime.now(),
-      brand: _brandMeta.$2,
+      brand: _brandMeta.$1,
       authMode: authMode,
       cfg: cfg,
       snap: loggedOk ? res.snapshot : null,

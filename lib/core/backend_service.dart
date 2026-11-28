@@ -226,6 +226,23 @@ class InverterConfig {
 }
 
 /// Latest live telemetry snapshot returned from Manufacturer Website Login or API Integration.
+/// One plant (power station) on an inverter login. Used for the plant picker.
+class InverterPlantOption {
+  final String id;
+  final String name;
+  final String loggerSn;
+
+  const InverterPlantOption({required this.id, required this.name, this.loggerSn = ''});
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'loggerSn': loggerSn};
+
+  factory InverterPlantOption.fromJson(Map<String, dynamic> j) => InverterPlantOption(
+        id: (j['id'] as String?) ?? '',
+        name: (j['name'] as String?) ?? '',
+        loggerSn: (j['loggerSn'] as String?) ?? '',
+      );
+}
+
 class InverterSnapshot {
   final String brand;
   final String authMode;
@@ -243,6 +260,12 @@ class InverterSnapshot {
   final List<InverterDailyLog> dailyLogs;
   final int syncedAt;
   final String note;
+  /// Every plant on this login (empty when the portal gives one plant only).
+  final List<InverterPlantOption> plants;
+  /// The plant this snapshot is for.
+  final String plantId;
+  /// Logger (data collector) serial number, if the portal returns it.
+  final String loggerSerial;
 
   const InverterSnapshot({
     required this.brand,
@@ -261,6 +284,9 @@ class InverterSnapshot {
     this.dailyLogs = const [],
     required this.syncedAt,
     this.note = '',
+    this.plants = const [],
+    this.plantId = '',
+    this.loggerSerial = '',
   });
 
   bool get isPlantOnline => plantStatus.toLowerCase() == 'online';
@@ -283,9 +309,15 @@ class InverterSnapshot {
         'dailyLogs': dailyLogs.map((e) => e.toJson()).toList(),
         'syncedAt': syncedAt,
         'note': note,
+        'plants': plants.map((e) => e.toJson()).toList(),
+        'plantId': plantId,
+        'loggerSerial': loggerSerial,
       };
 
   factory InverterSnapshot.fromJson(Map<String, dynamic> j) => InverterSnapshot(
+        plants: [for (final e in (j['plants'] as List?) ?? const []) if (e is Map) InverterPlantOption.fromJson(e.cast<String, dynamic>())],
+        plantId: (j['plantId'] as String?) ?? '',
+        loggerSerial: (j['loggerSerial'] as String?) ?? '',
         brand: (j['brand'] as String?) ?? 'soliscloud',
         authMode: (j['authMode'] as String?) ?? 'website',
         plantName: (j['plantName'] as String?) ?? '',
@@ -1540,6 +1572,23 @@ class BackendService {
 
   static Map<String, dynamic>? _asMap(dynamic v) =>
       v is Map ? v.cast<String, dynamic>() : null;
+
+  /// Plant options from a brand's plant list. Missing fields stay empty.
+  static List<InverterPlantOption> _plantOptionsFrom(
+    List<Map<String, dynamic>> list,
+    List<String> idKeys,
+    List<String> nameKeys,
+    List<String> loggerKeys,
+  ) =>
+      [
+        for (final p in list)
+          if (_pickStr(p, idKeys).isNotEmpty)
+            InverterPlantOption(
+              id: _pickStr(p, idKeys),
+              name: _pickStr(p, nameKeys).isEmpty ? 'Plant ${_pickStr(p, idKeys)}' : _pickStr(p, nameKeys),
+              loggerSn: _pickStr(p, loggerKeys),
+            ),
+      ];
 
   static List<Map<String, dynamic>> _asListOfMaps(dynamic v) {
     if (v is! List) return const [];
@@ -3039,6 +3088,9 @@ class BackendService {
       return (
         ok: true,
         snapshot: InverterSnapshot(
+          plants: _plantOptionsFrom(stations, ['id'], ['name'], ['loggerSn','collectorSn','deviceSn']),
+          plantId: _pickStr(chosen, ['id']),
+          loggerSerial: _pickStr(chosen, ['loggerSn','collectorSn','deviceSn']),
           brand: 'solarman',
           authMode: 'api',
           plantName: _pickStr(chosen, ['name']).isNotEmpty ? _pickStr(chosen, ['name']) : 'Solarman Plant',
@@ -3089,6 +3141,9 @@ class BackendService {
     return (
       ok: true,
       snapshot: InverterSnapshot(
+        plants: _plantOptionsFrom(webStations, ['id'], ['name'], ['loggerSn','collectorSn','deviceSn']),
+        plantId: _pickStr(chosen, ['id']),
+        loggerSerial: _pickStr(chosen, ['loggerSn','collectorSn','deviceSn']),
         brand: 'solarman',
         authMode: 'website',
         plantName: _pickStr(chosen, ['name']).isNotEmpty ? _pickStr(chosen, ['name']) : 'Solarman Plant',
@@ -3242,6 +3297,9 @@ class BackendService {
     return (
       ok: true,
       snapshot: InverterSnapshot(
+        plants: _plantOptionsFrom(plants, ['ps_id'], ['ps_name'], ['logger_sn','dev_sn']),
+        plantId: _pickStr(chosen, ['ps_id']),
+        loggerSerial: _pickStr(chosen, ['logger_sn','dev_sn']),
         brand: 'sungrow',
         authMode: config.authMode,
         plantName: _pickStr(chosen, ['ps_name']).isNotEmpty
@@ -3267,6 +3325,9 @@ class BackendService {
   static InverterSnapshot _rebrandSnapshot(InverterSnapshot snap, String brandId, String brandLabel) {
     return InverterSnapshot(
       brand: brandId,
+      plants: snap.plants,
+      plantId: snap.plantId,
+      loggerSerial: snap.loggerSerial,
       authMode: snap.authMode,
       plantName: snap.plantName.isNotEmpty ? snap.plantName : '$brandLabel Plant',
       plantStatus: snap.plantStatus,
@@ -3427,6 +3488,9 @@ class BackendService {
     return (
       ok: true,
       snapshot: InverterSnapshot(
+        plants: _plantOptionsFrom(plants, ['pid','plantid','id'], ['name','plantname'], ['loggerSn','logger_sn','collectorSn']),
+        plantId: _pickStr(chosen, ['pid','plantid','id']),
+        loggerSerial: _pickStr(chosen, ['loggerSn','logger_sn','collectorSn']),
         brand: brandId,
         authMode: config.authMode,
         plantName: plantName,

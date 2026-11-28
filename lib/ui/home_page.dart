@@ -3,9 +3,11 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../core/calc.dart';
 import '../core/i18n.dart';
+import '../core/backend_service.dart';
 import '../core/inverter_history.dart';
 import '../core/store.dart';
 import '../core/sun.dart';
+import 'inverter_login_sheet.dart';
 import 'inverter_sync_sheet.dart';
 import 'location_sheet.dart';
 import 'profile_dialog.dart';
@@ -312,7 +314,7 @@ class _HomePageState extends State<HomePage> {
         Panel(
           radius: 22,
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          onTap: () => showInverterSyncDialog(context, s),
+          onTap: () => _onInverterCardTap(s),
           child: Row(children: [
             Container(
               width: 40,
@@ -334,7 +336,7 @@ class _HomePageState extends State<HomePage> {
                 Text(
                   snap == null
                       ? 'Manufacturer Website Login · API Integration'
-                      : '${fmtPowerKw(snap.currentKw)} live · ${fmtEnergyKwh(snap.todayKwh)} today · Logger ${snap.loggerStatus}',
+                      : '${fmtPowerKw(snap.currentKw)} live · ${fmtEnergyKwh(snap.todayKwh)} today · ${_loggerLine(snap)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: snap != null ? C.green : C.mute, fontSize: 12),
@@ -342,6 +344,28 @@ class _HomePageState extends State<HomePage> {
               ]),
             ),
             const SizedBox(width: 8),
+            if (snap != null && snap.plants.length > 1) ...[
+              PopupMenuButton<String>(
+                tooltip: 'Choose plant',
+                onSelected: (id) => _pickPlant(s, id),
+                itemBuilder: (_) => [
+                  for (final p in snap.plants)
+                    PopupMenuItem<String>(
+                      value: p.id,
+                      child: Text(p.id == snap.plantId ? '${p.name}  ✓' : p.name, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(12)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('Plant', style: TextStyle(color: C.sky, fontWeight: FontWeight.w800, fontSize: 12)),
+                    Icon(Icons.arrow_drop_down, color: C.sky, size: 18),
+                  ]),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(color: C.chipBlue, borderRadius: BorderRadius.circular(12)),
@@ -637,15 +661,52 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Tapping an account shows its stored data at once. No login is needed.
+  /// The saved account that is connected now, if it was saved.
+  InverterLoginItem? _activeInverterAccount(AppState s) {
+    final c = s.inverterCfg;
+    return s.inverterLogins
+        .where((x) => x.brand == c.brand && x.account == c.username && x.authMode == c.authMode)
+        .firstOrNull;
+  }
+
+  /// Welcome card tap: a saved website account opens the login sheet; otherwise the setup dialog.
+  void _onInverterCardTap(AppState s) {
+    final active = _activeInverterAccount(s);
+    if (active != null && s.inverterCfg.authMode == 'website') {
+      showInverterLoginSheet(context, s, active);
+    } else {
+      showInverterSyncDialog(context, s);
+    }
+  }
+
+  /// Plant picker: logs in again for the chosen plant.
+  void _pickPlant(AppState s, String plantId) {
+    final active = _activeInverterAccount(s);
+    if (active == null) return;
+    showInverterLoginSheet(context, s, active, stationId: plantId);
+  }
+
+  /// Logger serial and status, for the welcome card and account rows.
+  String _loggerLine(InverterSnapshot snap) =>
+      snap.loggerSerial.isEmpty ? 'Logger ${snap.loggerStatus}' : 'Logger ${snap.loggerSerial} (${snap.loggerStatus})';
+
+  /// Brand label from its id, for stored accounts.
+  String _brandLabel(String id) => kInverterBrands.where((b) => b.$1 == id).map((b) => b.$2).firstOrNull ?? id;
+
+  /// Tapping an account makes it active, shows its stored data, and opens the login sheet.
   void _useInverterAccount(AppState s, InverterLoginItem e) {
     if (e.cfg != null) s.inverterCfg = e.cfg!;
     s.inverterSnap = e.snap;
     s.saveInverter();
     setState(() {});
+    if (e.authMode == 'website') {
+      showInverterLoginSheet(context, s, e);
+    } else {
+      showInverterSyncDialog(context, s, autoSync: true);
+    }
   }
 
-  /// Inverter accounts, one row each. Passwords are never stored.
+  /// Saved inverter accounts, one row each. Passwords are never stored.
   Widget _inverterLoginHistory(AppState s) {
     final items = s.inverterLogins;
     return Panel(
@@ -671,7 +732,7 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('${e.brand} · ${e.account.isEmpty ? '-' : e.account}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                      Text('${_brandLabel(e.brand)} · ${e.account.isEmpty ? '-' : e.account}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
                       Text(
                         e.snap == null
                             ? e.message
@@ -683,13 +744,16 @@ class _HomePageState extends State<HomePage> {
                     ]),
                   ),
                   IconButton(
-                    tooltip: 'Sync this account',
+                    tooltip: 'Login',
                     visualDensity: VisualDensity.compact,
-                    onPressed: () {
-                      _useInverterAccount(s, e);
-                      showInverterSyncDialog(context, s, autoSync: true);
-                    },
-                    icon: Icon(Icons.sync, color: C.blue, size: 18),
+                    onPressed: () => _useInverterAccount(s, e),
+                    icon: Icon(Icons.login, color: C.blue, size: 18),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() => s.removeInverterAccount(e)),
+                    icon: Icon(Icons.delete_outline, color: C.mute, size: 18),
                   ),
                 ]),
               ),

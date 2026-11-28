@@ -386,6 +386,16 @@ class _EstimatorPageState extends State<EstimatorPage> {
   }
 
   // ---------- small building blocks ----------
+  /// Numbered label above each estimator card, showing the order of the flow. Layout only.
+  Widget _stepHeader(int n, String label) => Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+        child: Row(children: [
+          CircleAvatar(radius: 11, backgroundColor: C.orange, child: Text('$n', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
+          const SizedBox(width: 8),
+          Text(label, style: TextStyle(color: C.mute, fontWeight: FontWeight.w800, fontSize: 13)),
+        ]),
+      );
+
   Widget _title(IconData ic, Color c, String t, String sub) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(width: 42, height: 42, decoration: BoxDecoration(color: c.withValues(alpha: .15), shape: BoxShape.circle), child: Icon(ic, color: c, size: 22)),
         const SizedBox(width: 12),
@@ -576,6 +586,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
     final activeRate = _activeRate(u);
 
     return [
+      _stepHeader(1, 'USC / DISCOM fetch'),
       // Collapsible 4-State Live USC / DISCOM Bill Fetch Panel
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -691,6 +702,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+      _stepHeader(2, 'Units or bill'),
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _title(Icons.receipt_long_outlined, C.amber, 'Monthly Bills & Units Enquiry', 'Enter your monthly units or a bill amount'),
@@ -765,6 +777,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+      _stepHeader(3, 'Rate & roof area'),
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -810,6 +823,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+      _stepHeader(4, 'System type'),
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -832,6 +846,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+      _stepHeader(5, 'Category & module'),
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           if (u > 0)
@@ -890,6 +905,7 @@ class _EstimatorPageState extends State<EstimatorPage> {
         ]),
       ),
       _gap(),
+      _stepHeader(6, 'Calculate'),
       _bigButton('Calculate the Solar System', _calc, icon: Icons.arrow_forward),
       _gap(),
       Panel(

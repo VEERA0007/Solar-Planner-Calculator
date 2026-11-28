@@ -782,13 +782,11 @@ class _EstimatorPageState extends State<EstimatorPage> {
             ),
             child: Row(children: [
               Expanded(
-                child: Text('₹ ${activeRate.toStringAsFixed(2)} / kWh',
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: C.green)),
+                child: Text(activeRate.toStringAsFixed(2),
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20, color: C.text)),
               ),
-              Icon(syncingTariff ? Icons.sync : Icons.verified_outlined, size: 16, color: C.green),
-              const SizedBox(width: 5),
-              Text(syncingTariff ? 'Syncing…' : 'Auto-synced by DISCOM',
-                  style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 11.5)),
+              Text(syncingTariff ? 'Syncing…' : 'Govt DISCOM Rate',
+                  style: TextStyle(color: C.green, fontWeight: FontWeight.w700, fontSize: 13)),
             ]),
           ),
           const SizedBox(height: 6),
@@ -835,10 +833,13 @@ class _EstimatorPageState extends State<EstimatorPage> {
       Panel(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           if (u > 0)
-            Row(children: [
-              Icon(Icons.check_circle_outline, color: C.green, size: 19),
-              const SizedBox(width: 6),
-              Expanded(child: Text('Analyzed Usage: ${u.round()} kWh · ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(Icons.check_circle_outline, color: C.green, size: 19),
+                const SizedBox(width: 6),
+                Expanded(child: Text('Analyzed ${s.discom.name} Usage: ${u.round()} kWh · ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
+              ]),
+              const SizedBox(height: 8),
               Container(padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3), decoration: BoxDecoration(color: C.chipGreen, borderRadius: BorderRadius.circular(10)), child: Text('Validated', style: TextStyle(color: C.green, fontWeight: FontWeight.w800, fontSize: 11.5))),
             ])
           else
@@ -848,6 +849,10 @@ class _EstimatorPageState extends State<EstimatorPage> {
             CircleAvatar(radius: 11, backgroundColor: C.orange, child: const Text('1', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800))),
             const SizedBox(width: 8),
             const Text('Installation Category', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            if (u > 0) ...[
+              const Spacer(),
+              Flexible(child: Text('Based on ${u.round()} kWh · ₹${groupIndian(_num(tariffOverride) > 0 ? u * _num(tariffOverride) : plan.bill(u))}/mo', textAlign: TextAlign.right, style: TextStyle(color: C.mute, fontSize: 11.5))),
+            ],
           ]),
           const SizedBox(height: 10),
           Row(children: [
@@ -855,18 +860,18 @@ class _EstimatorPageState extends State<EstimatorPage> {
               setState(() => category = 'residential');
               s.prefs.category = 'domestic';
               s.savePrefs();
-            }, sub: 'Open Capex'),
+            }, sub: 'Govt Subsidy'),
             _chip('Commercial', category == 'commercial', () {
               setState(() => category = 'commercial');
               s.prefs.category = 'commercial';
               s.savePrefs();
-            }, sub: 'Lower Cost'),
+            }, sub: 'ALMM Spec'),
             _chip('Industrial', category == 'industrial', () {
               setState(() => category = 'industrial');
               s.prefs.category = 'industrial';
               s.savePrefs();
             }, sub: 'Plant'),
-            _chip('Agricultural', category == 'agricultural', () => setState(() => category = 'agricultural'), sub: 'Pumps'),
+            _chip('Agricultural', category == 'agricultural', () => setState(() => category = 'agricultural'), sub: 'PM-KUSUM'),
           ]),
           _gap(),
           Row(children: [
